@@ -1,48 +1,54 @@
-import { AgentSession } from "@scheduling-agent/database";
+import { Thread } from "@scheduling-agent/database";
+import type { AgentId, SessionSummary } from "@scheduling-agent/types";
 import { Op } from "sequelize";
-import type { EmployeeId, SessionSummary } from "@scheduling-agent/types";
+import { logger } from "../logger";
 
-/** How far back (in hours) to look for recent session summaries. */
-const SUMMARY_WINDOW_HOURS = 48;
-/** Maximum number of recent summaries to inject into context. */
-const MAX_SUMMARIES = 2;
+const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+
+export type LoadRecentSessionSummariesOptions = {
+  /**
+   * Omit summaries for this thread (e.g. the active conversation) so we only pull
+   * prior threads belonging to the same agent.
+   */
+  excludeThreadId?: string;
+};
 
 /**
- * Loads up to two of the most recent session summaries for `empId` from
- * the `agent_sessions` table, where `summary IS NOT NULL` and
- * `summarized_at` is within the last 48 hours.
- *
- * Results are ordered by `summarized_at DESC` so the newest summary
- * comes first.  This helper is called from contextBuilder on every turn
- * and is **additive** to pgvector episodic retrieval.
+ * Loads up to two of the most recent session summaries for the given **agent**
+ * from `threads` where `summary` is set and `summarized_at` is within the
+ * last 48 hours. Agent-level scoping ensures memory persists across conversations.
  */
 export async function loadRecentSessionSummaries(
-  empId: EmployeeId,
+  agentId: AgentId | null,
+  options: LoadRecentSessionSummariesOptions = {},
 ): Promise<SessionSummary[]> {
-  try {
-    const cutoff = new Date(
-      Date.now() - SUMMARY_WINDOW_HOURS * 60 * 60 * 1000,
-    );
+  if (!agentId) return [];
 
-    const rows = await AgentSession.findAll({
+  const since = new Date(Date.now() - FORTY_EIGHT_HOURS_MS);
+  const { excludeThreadId } = options;
+
+  const threadFilter =
+    excludeThreadId != null && excludeThreadId !== ""
+      ? { threadId: { [Op.ne]: excludeThreadId } }
+      : {};
+
+  try {
+    const rows = await Thread.findAll({
       where: {
-        empId,
+        agentId,
+        ...threadFilter,
         summary: { [Op.ne]: null },
-        summarizedAt: { [Op.gte]: cutoff },
+        summarizedAt: { [Op.gte]: since },
       },
-      order: [["summarized_at", "DESC"]],
-      limit: MAX_SUMMARIES,
-      attributes: ["summary"],
+      order: [["summarizedAt", "DESC"]],
+      limit: 2,
     });
 
     return rows
       .map((r) => r.summary)
-      .filter((s): s is SessionSummary => s !== null);
+      .filter((s): s is SessionSummary => s != null);
   } catch (err) {
-    console.error(
-      `[sessionSummaryLoader] Failed to load summaries for emp ${empId}:`,
-      err,
-    );
+    logger.error("Session summary load failed", { agentId, error: String(err) });
     return [];
   }
 }

@@ -2,6 +2,127 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+html, body {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Safe area padding for notched devices */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Prevent tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Markdown prose inside chat messages */
+.chat-prose {
+  line-height: 1.65;
+}
+.chat-prose p {
+  margin: 0;
+}
+.chat-prose p + p {
+  margin-top: 0.5em;
+}
+.chat-prose ul,
+.chat-prose ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.chat-prose li {
+  margin: 0.15em 0;
+}
+.chat-prose code {
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  border-radius: 0.3em;
+  background: rgba(0, 0, 0, 0.06);
+  font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+}
+.chat-prose pre {
+  margin: 0.5em 0;
+  padding: 0.75em 1em;
+  border-radius: 0.5em;
+  background: rgba(0, 0, 0, 0.06);
+  overflow-x: auto;
+  font-size: 0.85em;
+}
+.chat-prose pre code {
+  padding: 0;
+  background: transparent;
+}
+.chat-prose strong {
+  font-weight: 600;
+}
+.chat-prose a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-prose blockquote {
+  border-left: 3px solid rgba(0, 0, 0, 0.15);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  opacity: 0.85;
+}
+.chat-prose h1,
+.chat-prose h2,
+.chat-prose h3 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.chat-prose table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+}
+.chat-prose th,
+.chat-prose td {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 0.3em 0.6em;
+}
+.chat-prose th {
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+/* User message prose overrides (light text on dark bg) */
+.chat-prose-user code {
+  background: rgba(255, 255, 255, 0.15);
+}
+.chat-prose-user pre {
+  background: rgba(255, 255, 255, 0.1);
+}
+.chat-prose-user blockquote {
+  border-left-color: rgba(255, 255, 255, 0.3);
+}
+.chat-prose-user th,
+.chat-prose-user td {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.chat-prose-user th {
+  background: rgba(255, 255, 255, 0.08);
+}
+.chat-prose-user a {
+  color: inherit;
 }

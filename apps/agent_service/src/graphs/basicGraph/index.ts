@@ -1,46 +1,41 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
-import { SchedulerAgentAnnotation, SchedulerAgentState } from "../state";
+import { SchedulerAgentAnnotation, SchedulerAgentState } from "../../state";
 import { summarizationGuardNode } from "./nodes/summarizationGuard";
 import { sessionSummarizationNode } from "./nodes/sessionSummarization";
 import { contextBuilderNode } from "./nodes/contextBuilder";
+import { callModelNode } from "./nodes/callModel";
 
 // ─── Routing helpers ─────────────────────────────────────────────────────────
 
 function routeAfterGuard(state: SchedulerAgentState): string {
-  if (state.error) return END;
   if (state.needsSummarization) return "sessionSummarization";
   return "assembleContext";
-}
-
-function routeAfterContext(state: SchedulerAgentState): string {
-  if (state.error) return END;
-  return END; // Extend: route to agent / tool-calling nodes in later milestones.
 }
 
 // ─── Graph definition ────────────────────────────────────────────────────────
 //
 //  START → summarizationGuard
-//            ├── (thresholds exceeded) → sessionSummarization → assembleContext → END
-//            └── (normal)              → assembleContext → END
+//            ├── (thresholds exceeded) → sessionSummarization → assembleContext → callModel → END
+//            └── (normal)              → assembleContext → callModel → END
 //
 
 const workflow = new StateGraph(SchedulerAgentAnnotation)
   .addNode("summarizationGuard", summarizationGuardNode)
   .addNode("sessionSummarization", sessionSummarizationNode)
   .addNode("assembleContext", contextBuilderNode)
+  .addNode("callModel", callModelNode)
 
   .addEdge(START, "summarizationGuard")
 
   .addConditionalEdges("summarizationGuard", routeAfterGuard, {
     sessionSummarization: "sessionSummarization",
     assembleContext: "assembleContext",
-    [END]: END,
   })
 
   .addEdge("sessionSummarization", "assembleContext")
-
-  .addConditionalEdges("assembleContext", routeAfterContext, { [END]: END });
+  .addEdge("assembleContext", "callModel")
+  .addEdge("callModel", END);
 
 /**
  * Creates the Postgres checkpointer, runs its setup (creates checkpoint

@@ -6,7 +6,15 @@
       "Bash(npm ls:*)",
       "Bash(npm view:*)",
       "Bash(npm install:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(docker compose:*)",
+      "Bash(npx vite:*)",
+      "Bash(find node_modules/@langchain/anthropic -name *.js -o -name *.ts -o -name *.d.ts)",
+      "Bash(npm list:*)",
+      "Bash(find . -path */node_modules/@langchain/anthropic/package.json)",
+      "WebFetch(domain:reference.langchain.com)",
+      "WebSearch"
     ]
   }
 }

@@ -3,7 +3,7 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
-    await queryInterface.createTable("agent_sessions", {
+    await queryInterface.createTable("threads", {
       id: {
         type: Sequelize.UUID,
         defaultValue: Sequelize.UUIDV4,
@@ -15,10 +15,10 @@ module.exports = {
         unique: true,
         allowNull: false,
       },
-      emp_id: {
+      user_id: {
         type: Sequelize.STRING,
         allowNull: false,
-        references: { model: "employees", key: "id" },
+        references: { model: "users", key: "id" },
         onUpdate: "CASCADE",
         onDelete: "CASCADE",
       },
@@ -62,22 +62,22 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("agent_sessions", ["emp_id"], {
-      name: "agent_sessions_emp_id",
+    await queryInterface.addIndex("threads", ["user_id"], {
+      name: "threads_user_id",
     });
     await queryInterface.addIndex(
-      "agent_sessions",
-      ["emp_id", "summarized_at"],
-      { name: "agent_sessions_emp_id_summarized_at" }
+      "threads",
+      ["user_id", "summarized_at"],
+      { name: "threads_user_id_summarized_at" },
     );
     await queryInterface.addIndex(
-      "agent_sessions",
-      ["emp_id", "updated_at"],
-      { name: "agent_sessions_emp_id_updated_at" }
+      "threads",
+      ["user_id", "updated_at"],
+      { name: "threads_user_id_updated_at" },
     );
   },
 
   async down(queryInterface, _Sequelize) {
-    await queryInterface.dropTable("agent_sessions");
+    await queryInterface.dropTable("threads");
   },
 };

@@ -1,37 +1,45 @@
 import { DataTypes, Model, Optional, Sequelize } from "sequelize";
 import { sequelize } from "../connection";
-import type { EmployeeAttributes, EmployeeIdentity } from "@scheduling-agent/types";
+import type { UserAttributes, UserIdentity } from "@scheduling-agent/types";
 
-type EmployeeCreationAttributes = Optional<
-  EmployeeAttributes,
+type UserCreationAttributes = Optional<
+  UserAttributes,
   | "id"
   | "createdAt"
   | "updatedAt"
   | "externalRef"
   | "displayName"
-  | "employeeIdentity"
+  | "userIdentity"
   | "password"
+  | "userName"
 >;
 
-class Employee
-  extends Model<EmployeeAttributes, EmployeeCreationAttributes>
-  implements EmployeeAttributes
+class User
+  extends Model<UserAttributes, UserCreationAttributes>
+  implements UserAttributes
 {
   declare id: string;
+  declare userName: string;
   declare externalRef: string | null;
   declare displayName: string | null;
-  declare employeeIdentity: EmployeeIdentity | null;
+  declare userIdentity: UserIdentity | null;
   declare password: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 }
 
-Employee.init(
+User.init(
   {
     id: {
       type: DataTypes.STRING,
       primaryKey: true,
-      defaultValue: Sequelize.literal(`('EMP' || gen_random_uuid()::text)`),
+      defaultValue: Sequelize.literal(`('USR-' || gen_random_uuid()::text)`),
+    },
+    userName: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+      field: "user_name",
     },
     externalRef: {
       type: DataTypes.STRING,
@@ -44,10 +52,10 @@ Employee.init(
       allowNull: true,
       field: "display_name",
     },
-    employeeIdentity: {
+    userIdentity: {
       type: DataTypes.JSONB,
       allowNull: true,
-      field: "employee_identity",
+      field: "user_identity",
     },
     password: {
       type: DataTypes.STRING,
@@ -66,10 +74,10 @@ Employee.init(
   },
   {
     sequelize,
-    tableName: "employees",
+    tableName: "users",
     underscored: true,
     timestamps: true,
   },
 );
 
-export { Employee };
+export { User };

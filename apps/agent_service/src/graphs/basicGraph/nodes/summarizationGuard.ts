@@ -1,5 +1,6 @@
-import { AgentSession } from "@scheduling-agent/database";
-import type { SchedulerAgentState } from "../../state";
+import { Thread } from "@scheduling-agent/database";
+import type { SchedulerAgentState } from "../../../state";
+import { logger } from "../../../logger";
 
 /**
  * Default thresholds — override via environment variables.
@@ -28,25 +29,25 @@ const MAX_CHECKPOINT_BYTES = parseInt(
 export async function summarizationGuardNode(
   state: SchedulerAgentState,
 ): Promise<Partial<SchedulerAgentState>> {
-  if (state.error) return {};
+  // NOTE: always clear `error` so a stale failure from a previous checkpoint
+  // does not short-circuit the entire turn. Fresh errors set by downstream
+  // nodes (sessionSummarization, callModel) still propagate normally.
 
   const { threadId, messages } = state;
 
   try {
     // ── Size check: message count ────────────────────────────────────
     if (messages && messages.length >= MAX_MESSAGES) {
-      console.log(
-        `[summarizationGuard] Message count (${messages.length}) >= ${MAX_MESSAGES} — summarization required.`,
-      );
-      return { needsSummarization: true };
+      logger.info("Thread size exceeded — summarization required", { threadId, messageCount: messages.length, threshold: MAX_MESSAGES });
+      return { needsSummarization: true, error: null };
     }
 
     // ── DB-backed checks (TTL + checkpoint size) ─────────────────────
-    const session = await AgentSession.findOne({ where: { threadId } });
+    const session = await Thread.findOne({ where: { threadId } });
 
     if (!session) {
       // New session — nothing to summarize yet.
-      return { needsSummarization: false };
+      return { needsSummarization: false, error: null };
     }
 
     // TTL: idle too long since last activity.
@@ -54,19 +55,15 @@ export async function summarizationGuardNode(
       const idleMs = Date.now() - new Date(session.lastActivityAt).getTime();
       const idleMinutes = idleMs / 60_000;
       if (idleMinutes >= TTL_IDLE_MINUTES && !session.summarizedAt) {
-        console.log(
-          `[summarizationGuard] Idle ${Math.round(idleMinutes)}m >= ${TTL_IDLE_MINUTES}m — summarization required.`,
-        );
-        return { needsSummarization: true };
+        logger.info("Thread TTL expired (idle) — summarization required", { threadId, idleMinutes: Math.round(idleMinutes), threshold: TTL_IDLE_MINUTES });
+        return { needsSummarization: true, error: null };
       }
     }
 
     // TTL: hard expiry.
     if (session.ttlExpiresAt && new Date(session.ttlExpiresAt) <= new Date()) {
-      console.log(
-        "[summarizationGuard] TTL expired — summarization required.",
-      );
-      return { needsSummarization: true };
+      logger.info("Thread hard TTL expired — summarization required", { threadId });
+      return { needsSummarization: true, error: null };
     }
 
     // Size: checkpoint byte estimate (if tracked by the application).
@@ -74,16 +71,14 @@ export async function summarizationGuardNode(
       session.checkpointSizeBytes &&
       Number(session.checkpointSizeBytes) >= MAX_CHECKPOINT_BYTES
     ) {
-      console.log(
-        `[summarizationGuard] Checkpoint size (${session.checkpointSizeBytes}) >= ${MAX_CHECKPOINT_BYTES} — summarization required.`,
-      );
-      return { needsSummarization: true };
+      logger.info("Thread checkpoint size exceeded — summarization required", { threadId, bytes: session.checkpointSizeBytes, threshold: MAX_CHECKPOINT_BYTES });
+      return { needsSummarization: true, error: null };
     }
 
-    return { needsSummarization: false };
+    return { needsSummarization: false, error: null };
   } catch (err) {
-    console.error("[summarizationGuard]", err);
+    logger.error("Summarization guard error", { threadId, error: String(err) });
     // On guard failure, skip summarization and proceed normally.
-    return { needsSummarization: false };
+    return { needsSummarization: false, error: null };
   }
 }

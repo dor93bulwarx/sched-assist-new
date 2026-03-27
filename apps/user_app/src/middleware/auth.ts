@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-in-production";
 
 export interface AuthPayload {
-  empId: string;
+  userId: string;
   displayName: string | null;
 }
 
@@ -18,6 +18,15 @@ declare global {
 
 export function signToken(payload: AuthPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "8h" });
+}
+
+/** Used by Socket.IO handshake (and anywhere else that has a raw bearer token). */
+export function verifyToken(token: string): AuthPayload | null {
+  try {
+    return jwt.verify(token, JWT_SECRET) as AuthPayload;
+  } catch {
+    return null;
+  }
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {

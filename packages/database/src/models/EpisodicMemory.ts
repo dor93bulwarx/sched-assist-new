@@ -10,7 +10,7 @@ export const EMBEDDING_DIMENSION = 1536;
 
 type EpisodicMemoryCreationAttributes = Optional<
   EpisodicMemoryAttributes,
-  "id" | "createdAt" | "metadata"
+  "id" | "createdAt" | "metadata" | "agentId"
 >;
 
 class EpisodicMemory
@@ -18,7 +18,9 @@ class EpisodicMemory
   implements EpisodicMemoryAttributes
 {
   declare id: string;
-  declare empId: string;
+  declare userId: string;
+  declare threadId: string;
+  declare agentId: string | null;
   declare content: string;
   declare embedding: number[];
   declare metadata: EpisodicChunkMetadata | null;
@@ -32,11 +34,25 @@ EpisodicMemory.init(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    empId: {
+    userId: {
       type: DataTypes.STRING,
       allowNull: false,
-      field: "emp_id",
-      references: { model: "employees", key: "id" },
+      field: "user_id",
+      references: { model: "users", key: "id" },
+    },
+    threadId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "thread_id",
+      references: { model: "threads", key: "thread_id" },
+      onUpdate: "CASCADE",
+      onDelete: "CASCADE",
+    },
+    agentId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "agent_id",
+      references: { model: "agents", key: "id" },
     },
     content: {
       type: DataTypes.TEXT,
@@ -65,7 +81,11 @@ EpisodicMemory.init(
     underscored: true,
     timestamps: true,
     updatedAt: false,
-    indexes: [{ fields: ["emp_id"] }],
+    indexes: [
+      { fields: ["user_id"] },
+      { fields: ["thread_id"] },
+      { fields: ["agent_id"] },
+    ],
   },
 );
 

@@ -1,56 +1,50 @@
 import { sequelize } from "@scheduling-agent/database";
+import type { AgentId } from "@scheduling-agent/types";
 import { QueryTypes } from "sequelize";
-import type { EmployeeId } from "@scheduling-agent/types";
 
-/** Maximum number of episodic chunks returned per query. */
-const DEFAULT_TOP_K = 5;
-
-interface EpisodicRow {
-  id: string;
-  content: string;
-  metadata: Record<string, unknown> | null;
-  distance: number;
-}
+import { logger } from "../logger";
 
 /**
- * Retrieves the most relevant episodic memory chunks for the given employee
- * using cosine similarity search over pgvector embeddings.
+ * Retrieves the top-K most similar episodic memory chunks for a query embedding.
  *
- * **Isolation:** every query hard-filters by `emp_id` so results are
- * exclusively those belonging to the requesting employee.
+ * **Isolation:** filters by `agent_id` so memory follows the agent across
+ * conversations (single chats, groups, or reassignments).
  *
- * @param empId      - The employee whose episodic memory to search.
- * @param embedding  - The query embedding vector (must match EMBEDDING_DIMENSION).
- * @param topK       - How many chunks to return (default 5).
- * @returns An array of content strings ordered by relevance (closest first).
+ * @param agentId    - The agent whose episodic memory to search.
+ * @param embedding  - Query vector (same dimension as `episodic_memory.embedding`).
+ * @param topK       - Number of chunks to return (default 5).
  */
 export async function retrieveEpisodicMemory(
-  empId: EmployeeId,
+  agentId: AgentId | null,
   embedding: number[],
-  topK: number = DEFAULT_TOP_K,
+  topK = 5,
 ): Promise<string[]> {
-  try {
-    const vectorLiteral = `[${embedding.join(",")}]`;
+  if (!agentId) {
+    return [];
+  }
 
-    const rows = await sequelize.query<EpisodicRow>(
-      `SELECT id, content, metadata,
-              embedding <=> :embedding AS distance
-       FROM   episodic_memory
-       WHERE  emp_id = :empId
-       ORDER  BY distance ASC
+  const vectorLiteral = `[${embedding.join(",")}]`;
+
+  try {
+    const rows = await sequelize.query<{ content: string }>(
+      `SELECT ep.content
+       FROM   episodic_memory ep
+       WHERE  ep.agent_id = :agentId
+       ORDER  BY ep.embedding <=> :embedding::vector
        LIMIT  :topK`,
       {
-        replacements: { empId, embedding: vectorLiteral, topK },
+        replacements: {
+          agentId,
+          embedding: vectorLiteral,
+          topK,
+        },
         type: QueryTypes.SELECT,
       },
     );
 
     return rows.map((r) => r.content);
   } catch (err) {
-    console.error(
-      `[episodicRetrieval] Failed to retrieve episodic memory for emp ${empId}:`,
-      err,
-    );
+    logger.error("Episodic memory retrieval failed", { agentId, error: String(err) });
     return [];
   }
 }

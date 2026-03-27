@@ -1,12 +1,16 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { sequelize } from "../connection";
-import type { AgentSessionAttributes, SessionSummary } from "@scheduling-agent/types";
+import type { ThreadAttributes, SessionSummary } from "@scheduling-agent/types";
 
-type AgentSessionCreationAttributes = Optional<
-  AgentSessionAttributes,
+type ThreadCreationAttributes = Optional<
+  ThreadAttributes,
   | "id"
   | "createdAt"
   | "updatedAt"
+  | "userId"
+  | "groupId"
+  | "singleChatId"
+  | "agentId"
   | "title"
   | "archivedAt"
   | "lastActivityAt"
@@ -16,13 +20,13 @@ type AgentSessionCreationAttributes = Optional<
   | "checkpointSizeBytes"
 >;
 
-class AgentSession
-  extends Model<AgentSessionAttributes, AgentSessionCreationAttributes>
-  implements AgentSessionAttributes
-{
+class Thread extends Model<ThreadAttributes, ThreadCreationAttributes> implements ThreadAttributes {
   declare id: string;
   declare threadId: string;
-  declare empId: string;
+  declare userId: string | null;
+  declare groupId: string | null;
+  declare singleChatId: string | null;
+  declare agentId: string | null;
   declare title: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -34,7 +38,7 @@ class AgentSession
   declare checkpointSizeBytes: number | null;
 }
 
-AgentSession.init(
+Thread.init(
   {
     id: {
       type: DataTypes.UUID,
@@ -47,11 +51,28 @@ AgentSession.init(
       allowNull: false,
       field: "thread_id",
     },
-    empId: {
+    userId: {
       type: DataTypes.STRING,
-      allowNull: false,
-      field: "emp_id",
-      references: { model: "employees", key: "id" },
+      allowNull: true,
+      field: "user_id",
+      references: { model: "users", key: "id" },
+    },
+    groupId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "group_id",
+      references: { model: "groups", key: "id" },
+    },
+    singleChatId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "single_chat_id",
+    },
+    agentId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "agent_id",
+      references: { model: "agents", key: "id" },
     },
     title: {
       type: DataTypes.STRING,
@@ -99,15 +120,42 @@ AgentSession.init(
   },
   {
     sequelize,
-    tableName: "agent_sessions",
+    tableName: "threads",
     underscored: true,
     timestamps: true,
     indexes: [
-      { fields: ["emp_id"] },
-      { fields: [{ name: "emp_id", order: "ASC" }, { name: "summarized_at", order: "DESC" }] },
-      { fields: [{ name: "emp_id", order: "ASC" }, { name: "updated_at", order: "DESC" }] },
+      { fields: ["user_id"] },
+      { fields: ["group_id"] },
+      { fields: ["single_chat_id"] },
+      { fields: ["agent_id"] },
+      { fields: [{ name: "user_id", order: "ASC" }, { name: "summarized_at", order: "DESC" }] },
+      { fields: [{ name: "user_id", order: "ASC" }, { name: "updated_at", order: "DESC" }] },
+      {
+        fields: [
+          { name: "group_id", order: "ASC" },
+          { name: "summarized_at", order: "DESC" },
+        ],
+      },
+      {
+        fields: [
+          { name: "group_id", order: "ASC" },
+          { name: "updated_at", order: "DESC" },
+        ],
+      },
+      {
+        fields: [
+          { name: "single_chat_id", order: "ASC" },
+          { name: "summarized_at", order: "DESC" },
+        ],
+      },
+      {
+        fields: [
+          { name: "single_chat_id", order: "ASC" },
+          { name: "updated_at", order: "DESC" },
+        ],
+      },
     ],
   },
 );
 
-export { AgentSession };
+export { Thread };

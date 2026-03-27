@@ -3,13 +3,13 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
-    await queryInterface.createTable("employees", {
+    await queryInterface.createTable("users", {
       id: {
         type: Sequelize.STRING,
         primaryKey: true,
         allowNull: false,
         defaultValue: Sequelize.literal(
-          `('EMP-' || gen_random_uuid()::text)`,
+          `('USR-' || gen_random_uuid()::text)`,
         ),
       },
       external_ref: {
@@ -21,7 +21,7 @@ module.exports = {
         type: Sequelize.STRING,
         allowNull: true,
       },
-      employee_identity: {
+      user_identity: {
         type: Sequelize.JSONB,
         allowNull: true,
       },
@@ -39,6 +39,6 @@ module.exports = {
   },
 
   async down(queryInterface, _Sequelize) {
-    await queryInterface.dropTable("employees");
+    await queryInterface.dropTable("users");
   },
 };

@@ -1,4 +1,11 @@
 export { sequelize } from "./connection";
-export { Employee } from "./models/Employee";
-export { AgentSession } from "./models/AgentSession";
+export { Vendor } from "./models/Vendor";
+export { LLMModel } from "./models/LLMModel";
+export { Agent } from "./models/Agent";
+export { User } from "./models/User";
+export { Group } from "./models/Group";
+export { GroupMember } from "./models/GroupMember";
+export { SingleChat } from "./models/SingleChat";
+export { Thread } from "./models/Thread";
 export { EpisodicMemory, EMBEDDING_DIMENSION } from "./models/EpisodicMemory";
+export { MessageNotification } from "./models/MessageNotification";

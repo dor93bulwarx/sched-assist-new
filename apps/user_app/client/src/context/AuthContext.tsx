@@ -6,7 +6,14 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { login as apiLogin, getMe } from "../lib/api";
+import {
+  login as apiLogin,
+  register as apiRegister,
+  getMe,
+  type Conversations,
+  type RegisterData,
+} from "../api";
+import { disconnectChatSocket } from "../sockets/chatSocket";
 
 interface User {
   id: string;
@@ -15,8 +22,11 @@ interface User {
 
 interface AuthContextValue {
   user: User | null;
+  conversations: Conversations | null;
+  setConversations: React.Dispatch<React.SetStateAction<Conversations | null>>;
   loading: boolean;
-  login: (empId: string, password: string) => Promise<void>;
+  login: (userName: string, password: string) => Promise<void>;
+  register: (data: RegisterData) => Promise<void>;
   logout: () => void;
 }
 
@@ -24,6 +34,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [conversations, setConversations] = useState<Conversations | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,29 +44,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     getMe()
-      .then((me) => setUser(me))
+      .then((me) => {
+        setUser({ id: me.id, displayName: me.displayName });
+        setConversations(me.conversations);
+      })
       .catch(() => {
         localStorage.removeItem("token");
       })
       .finally(() => setLoading(false));
   }, []);
 
-  const login = useCallback(async (empId: string, password: string) => {
-    const res = await apiLogin(empId, password);
+  const login = useCallback(async (userName: string, password: string) => {
+    const res = await apiLogin(userName, password);
     localStorage.setItem("token", res.token);
-    setUser({
-      id: res.employee.id,
-      displayName: res.employee.displayName,
-    });
+    setUser({ id: res.user.id, displayName: res.user.displayName });
+    setConversations(res.conversations);
+  }, []);
+
+  const register = useCallback(async (data: RegisterData) => {
+    const res = await apiRegister(data);
+    localStorage.setItem("token", res.token);
+    setUser({ id: res.user.id, displayName: res.user.displayName });
+    setConversations(res.conversations);
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem("token");
+    disconnectChatSocket();
     setUser(null);
+    setConversations(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, conversations, setConversations, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

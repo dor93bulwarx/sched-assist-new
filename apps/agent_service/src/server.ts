@@ -1,94 +1,103 @@
 import express from "express";
 import cors from "cors";
-import { AgentSession } from "@scheduling-agent/database";
+import type { Queue } from "bullmq";
+import { Thread, SingleChat, Group } from "@scheduling-agent/database";
 import { ensureSession } from "./memory/sessionRegistry";
 
+import type { AgentChatJobData, AgentChatJobResult } from "./queues/agentChat.bull";
 import type { CompiledStateGraph } from "@langchain/langgraph";
+import { logger } from "./logger";
+
+export type CreateServerDeps = {
+  agentChatQueue: Queue<AgentChatJobData, AgentChatJobResult, string>;
+  graph: CompiledStateGraph<any, any, any>;
+};
 
 /**
  * Creates and returns the Express app for agent_service.
- * The compiled graph is injected so routes can invoke it.
+ * Chat requests are enqueued on `agentChatQueue`; the worker emits results via Socket.IO.
  */
-export function createServer(graph: CompiledStateGraph<any, any, any>) {
+export function createServer({ agentChatQueue, graph }: CreateServerDeps) {
   const app = express();
 
   app.use(cors());
   app.use(express.json());
 
   // ── POST /api/chat ───────────────────────────────────────────────────
+  // Returns 202 immediately. Worker emits the result on Socket.IO (`agent:reply`).
   app.post("/api/chat", async (req, res) => {
-    const { empId, threadId, message } = req.body;
+    const { userId, threadId, message, groupId, singleChatId, agentId, requestId, mentionsAgent } = req.body;
 
-    if (!empId || !threadId || !message) {
-      return res.status(400).json({ error: "empId, threadId, and message are required." });
+    if (!userId || !threadId || !message) {
+      return res.status(400).json({ error: "userId, threadId, and message are required." });
     }
 
     try {
-      // Ensure session row exists and validate emp_id ownership.
-      await ensureSession(threadId, empId);
-
-      const result = await graph.invoke(
+      await agentChatQueue.add(
+        "chat",
         {
-          empId,
+          userId,
           threadId,
-          userInput: message,
-          messages: [{ role: "human", content: message }],
-        },
-        { configurable: { thread_id: threadId } },
+          message,
+          requestId: requestId ?? crypto.randomUUID(),
+          ...(groupId != null ? { groupId } : {}),
+          ...(singleChatId != null ? { singleChatId } : {}),
+          ...(agentId != null ? { agentId } : {}),
+          ...(mentionsAgent != null ? { mentionsAgent } : {}),
+        } satisfies AgentChatJobData,
       );
 
-      // Extract the last AI message from the result state.
-      const messages: any[] = Array.isArray(result.messages) ? result.messages : [];
-      const lastAiMessage = [...messages]
-        .reverse()
-        .find(
-          (m: any) =>
-            (typeof m._getType === "function" && m._getType() === "ai") ||
-            m.role === "assistant",
-        );
-
-      const reply =
-        lastAiMessage?.content ??
-        result.systemPrompt ??
-        "Context assembled. Agent response node not yet implemented.";
-
-      return res.json({
-        threadId,
-        reply: typeof reply === "string" ? reply : JSON.stringify(reply),
-        systemPrompt: result.systemPrompt ?? null,
-      });
+      return res.status(202).json({ status: "accepted", threadId });
     } catch (err: any) {
-      console.error("[server] /api/chat error:", err);
+      logger.error("/api/chat enqueue error", { error: err.message });
       return res.status(500).json({ error: err.message ?? "Internal error" });
     }
   });
 
-  // ── GET /api/sessions/:empId ─────────────────────────────────────────
-  app.get("/api/sessions/:empId", async (req, res) => {
+  // ── GET /api/sessions/:userId ─────────────────────────────────────────
+  app.get("/api/sessions/:userId", async (req, res) => {
     try {
-      const sessions = await AgentSession.findAll({
-        where: { empId: req.params.empId },
+      const where: Record<string, unknown> = { userId: req.params.userId };
+      if (req.query.groupId) where.groupId = req.query.groupId;
+      if (req.query.singleChatId) where.singleChatId = req.query.singleChatId;
+
+      const sessions = await Thread.findAll({
+        where,
         order: [["updated_at", "DESC"]],
-        attributes: ["id", "threadId", "empId", "title", "createdAt", "updatedAt", "lastActivityAt"],
+        attributes: ["id", "threadId", "userId", "groupId", "singleChatId", "title", "createdAt", "updatedAt", "lastActivityAt"],
       });
       return res.json(sessions);
     } catch (err: any) {
-      console.error("[server] /api/sessions/:empId error:", err);
+      logger.error("/api/sessions/:userId error", { error: err.message });
       return res.status(500).json({ error: err.message });
     }
   });
 
   // ── POST /api/sessions ──────────────────────────────────────────────
   app.post("/api/sessions", async (req, res) => {
-    const { empId, title } = req.body;
+    const { userId, title, groupId, singleChatId } = req.body;
 
-    if (!empId) {
-      return res.status(400).json({ error: "empId is required." });
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required." });
     }
 
     try {
+      // Resolve agentId from conversation scope
+      let agentId: string | null = null;
+      if (singleChatId) {
+        const sc = await SingleChat.findByPk(singleChatId, { attributes: ["agentId"] });
+        agentId = sc?.agentId ?? null;
+      } else if (groupId) {
+        const g = await Group.findByPk(groupId, { attributes: ["agentId"] });
+        agentId = g?.agentId ?? null;
+      }
+
       const threadId = crypto.randomUUID();
-      const session = await ensureSession(threadId, empId);
+      const session = await ensureSession(threadId, userId, {
+        groupId: groupId ?? undefined,
+        singleChatId: singleChatId ?? undefined,
+        agentId,
+      });
 
       if (title) {
         await session.update({ title });
@@ -97,13 +106,50 @@ export function createServer(graph: CompiledStateGraph<any, any, any>) {
       return res.status(201).json({
         id: session.id,
         threadId: session.threadId,
-        empId: session.empId,
+        userId: session.userId,
+        groupId: session.groupId,
+        singleChatId: session.singleChatId,
         title: session.title,
         createdAt: session.createdAt,
       });
     } catch (err: any) {
-      console.error("[server] POST /api/sessions error:", err);
+      logger.error("POST /api/sessions error", { error: err.message });
       return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/history/:threadId ─────────────────────────────────────
+  app.get("/api/history/:threadId", async (req, res) => {
+    try {
+      const state = await graph.getState({
+        configurable: { thread_id: req.params.threadId },
+      });
+
+      if (!state?.values) {
+        return res.json([]);
+      }
+
+      const msgs: any[] = Array.isArray(state.values.messages)
+        ? state.values.messages
+        : [];
+
+      const history = msgs.map((m: any) => {
+        let role: "user" | "assistant" = "user";
+        if (typeof m._getType === "function") {
+          const t = m._getType();
+          role = t === "human" ? "user" : "assistant";
+        } else if (m.role === "assistant" || m.role === "ai") {
+          role = "assistant";
+        }
+        const content =
+          typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return { role, content };
+      });
+
+      return res.json(history);
+    } catch (err: any) {
+      logger.error("/api/history/:threadId error", { threadId: req.params.threadId, error: err.message });
+      return res.json([]);
     }
   });
 

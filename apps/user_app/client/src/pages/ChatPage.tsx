@@ -1,77 +1,391 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Menu,
+  Sparkles,
+  X,
+  Loader2,
+  AlertTriangle,
+} from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import {
   getSessions,
   createSession,
   sendMessage,
+  getUnreadCounts,
+  getHistory,
+  getAgentsList,
+  createSingleChat,
+  deleteSingleChat,
+  getGroupMembers,
   type Session,
-} from "../lib/api";
-import SessionSidebar from "../components/SessionSidebar";
+  type AgentListItem,
+  type GroupMemberInfo,
+} from "../api";
+import {
+  getChatSocket,
+  markConversationSeen,
+  emitUserTyping,
+  type ChatReplyPayload,
+} from "../sockets/chatSocket";
+import SessionSidebar, {
+  type ConversationRef,
+} from "../components/SessionSidebar";
 import ChatMessage from "../components/ChatMessage";
 import ChatInput from "../components/ChatInput";
+import VendorModelBadge from "../components/VendorModelBadge";
+import ModelSelector from "../components/ModelSelector";
+import type { ConversationModelInfo } from "../api";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  /** Display name of the sender — set for group messages from other users. */
+  senderName?: string;
 }
 
 export default function ChatPage() {
-  const { user, logout } = useAuth();
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const { user, conversations, setConversations, logout } = useAuth();
+
+  const [activeConv, setActiveConv] = useState<ConversationRef | null>(null);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [sending, setSending] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [typingConversations, setTypingConversations] = useState<Set<string>>(
+    new Set(),
+  );
+  // Tracks which users are typing in group chats: groupId → Map<userId, displayName>
+  const [userTyping, setUserTyping] = useState<Map<string, Map<string, string>>>(
+    new Map(),
+  );
+  const userTypingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
+  const pendingReplies = useRef(
+    new Map<string, (p: ChatReplyPayload) => void>(),
+  );
+  const activeConvRef = useRef<ConversationRef | null>(null);
+  activeConvRef.current = activeConv;
 
-  // Load sessions on mount
   useEffect(() => {
-    getSessions()
-      .then((list) => {
-        setSessions(list);
-        if (list.length > 0) setActiveSession(list[0]);
-      })
+    getUnreadCounts()
+      .then(setUnreadCounts)
       .catch(() => {});
   }, []);
 
-  // Scroll to bottom when messages change
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [groupMembersList, setGroupMembersList] = useState<GroupMemberInfo[]>([]);
+
+  // Fetch group members when a group conversation is selected
+  useEffect(() => {
+    if (activeConv?.type !== "group") {
+      setGroupMembersList([]);
+      return;
+    }
+    getGroupMembers(activeConv.id)
+      .then(setGroupMembersList)
+      .catch(() => setGroupMembersList([]));
+  }, [activeConv?.id, activeConv?.type]);
+
+  useEffect(() => {
+    if (!activeConv) {
+      setActiveSession(null);
+      setMessages([]);
+      return;
+    }
+
+    let cancelled = false;
+    const scope =
+      activeConv.type === "group"
+        ? { groupId: activeConv.id }
+        : { singleChatId: activeConv.id };
+
+    setMessages([]);
+    setLoadingHistory(true);
+
+    getSessions(scope)
+      .then(async (list) => {
+        if (cancelled) return;
+        let session: Session;
+        if (list.length > 0) {
+          session = list[0];
+        } else {
+          session = await createSession(scope);
+        }
+        if (cancelled) return;
+        setActiveSession(session);
+
+        try {
+          const history = await getHistory(session.threadId);
+          if (!cancelled && history.length > 0) {
+            setMessages(history);
+          }
+        } catch {
+          // No history available
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingHistory(false);
+      });
+
+    markConversationSeen(activeConv.id, activeConv.type);
+    setUnreadCounts((prev) => {
+      if (!prev[activeConv.id]) return prev;
+      const next = { ...prev };
+      delete next[activeConv.id];
+      return next;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConv?.id]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // When switching sessions, clear messages (history will come from backend in future)
   useEffect(() => {
-    setMessages([]);
-  }, [activeSession?.id]);
+    if (!user) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
 
-  const handleNewChat = useCallback(async () => {
-    try {
-      const session = await createSession();
-      setSessions((prev) => [session, ...prev]);
-      setActiveSession(session);
-      setMessages([]);
-    } catch {
-      // ignore
-    }
+    const socket = getChatSocket(token);
+
+    const onTyping = (data: {
+      conversationId: string;
+      conversationType: string;
+    }) => {
+      setTypingConversations((prev) => {
+        const next = new Set(prev);
+        next.add(data.conversationId);
+        return next;
+      });
+    };
+
+    const onReply = (p: ChatReplyPayload) => {
+      setTypingConversations((prev) => {
+        if (!prev.has(p.conversationId)) return prev;
+        const next = new Set(prev);
+        next.delete(p.conversationId);
+        return next;
+      });
+
+      const cb = pendingReplies.current.get(p.requestId);
+      if (cb) {
+        cb(p);
+        pendingReplies.current.delete(p.requestId);
+        // Still mark as seen since the user is actively viewing this conversation
+        markConversationSeen(p.conversationId, p.conversationType);
+        return;
+      }
+
+      const current = activeConvRef.current;
+      const isForActiveConv = current && current.id === p.conversationId;
+
+      if (isForActiveConv) {
+        if (p.ok) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: p.reply },
+          ]);
+        }
+        markConversationSeen(p.conversationId, p.conversationType);
+      } else {
+        setUnreadCounts((prev) => ({
+          ...prev,
+          [p.conversationId]: (prev[p.conversationId] ?? 0) + 1,
+        }));
+      }
+    };
+
+    const onUserTyping = (data: {
+      groupId: string;
+      userId: string;
+      displayName: string;
+    }) => {
+      const key = `${data.groupId}:${data.userId}`;
+
+      // Clear previous timer for this user
+      const prev = userTypingTimers.current.get(key);
+      if (prev) clearTimeout(prev);
+
+      // Add typing indicator
+      setUserTyping((map) => {
+        const next = new Map(map);
+        const groupMap = new Map(next.get(data.groupId) ?? []);
+        groupMap.set(data.userId, data.displayName);
+        next.set(data.groupId, groupMap);
+        return next;
+      });
+
+      // Auto-clear after 3 seconds
+      userTypingTimers.current.set(
+        key,
+        setTimeout(() => {
+          userTypingTimers.current.delete(key);
+          setUserTyping((map) => {
+            const next = new Map(map);
+            const groupMap = new Map(next.get(data.groupId) ?? []);
+            groupMap.delete(data.userId);
+            if (groupMap.size === 0) next.delete(data.groupId);
+            else next.set(data.groupId, groupMap);
+            return next;
+          });
+        }, 3000),
+      );
+    };
+
+    const onGroupUserMessage = (data: {
+      groupId: string;
+      userId: string;
+      displayName: string;
+      message: string;
+    }) => {
+      const current = activeConvRef.current;
+      if (current?.type === "group" && current.id === data.groupId) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "user", content: data.message, senderName: data.displayName },
+        ]);
+      }
+    };
+
+    const onConversationsUpdated = (data: any) => {
+      if (data.action === "group_added" && data.group) {
+        setConversations((prev) => {
+          if (!prev) return prev;
+          if (prev.groups.some((g) => g.id === data.group.id)) return prev;
+          return {
+            ...prev,
+            groups: [...prev.groups, data.group],
+          };
+        });
+      } else if (data.action === "group_removed" && data.groupId) {
+        setConversations((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            groups: prev.groups.filter((g) => g.id !== data.groupId),
+          };
+        });
+      }
+    };
+
+    socket.on("thread:typing", onTyping);
+    socket.on("chat:reply", onReply);
+    socket.on("user:typing", onUserTyping);
+    socket.on("group:user-message", onGroupUserMessage);
+    socket.on("conversations:updated", onConversationsUpdated);
+    return () => {
+      socket.off("thread:typing", onTyping);
+      socket.off("chat:reply", onReply);
+      socket.off("user:typing", onUserTyping);
+      socket.off("group:user-message", onGroupUserMessage);
+      socket.off("conversations:updated", onConversationsUpdated);
+    };
+  }, [user]);
+
+  const handleSelectConversation = useCallback((conv: ConversationRef) => {
+    setActiveConv(conv);
+    setSidebarOpen(false);
   }, []);
+
+  // New Chat modal
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [availableAgents, setAvailableAgents] = useState<AgentListItem[]>([]);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
+  const [creatingChat, setCreatingChat] = useState(false);
+
+  const handleOpenNewChat = useCallback(() => {
+    setShowNewChat(true);
+    setAgentsLoaded(false);
+    getAgentsList()
+      .then((agents) => { setAvailableAgents(agents); setAgentsLoaded(true); })
+      .catch(() => setAgentsLoaded(true));
+  }, []);
+
+  async function handleCreateNewChat(agentId: string) {
+    setCreatingChat(true);
+    try {
+      const sc = await createSingleChat(agentId);
+      setConversations((prev) => {
+        if (!prev) return prev;
+        return { ...prev, singleChats: [sc, ...prev.singleChats] };
+      });
+      setShowNewChat(false);
+      setActiveConv({
+        type: "single",
+        id: sc.id,
+        name: sc.title || "Agent Chat",
+        agentId: sc.agentId,
+        model: sc.model,
+      });
+    } catch (err: any) {
+      alert(err.message || "Failed to create chat");
+    } finally {
+      setCreatingChat(false);
+    }
+  }
+
+  // Delete Chat confirmation
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteSingleChat(deleteTarget.id);
+      setConversations((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          singleChats: prev.singleChats.filter(
+            (sc) => sc.id !== deleteTarget.id,
+          ),
+        };
+      });
+      if (activeConv?.id === deleteTarget.id) {
+        setActiveConv(null);
+        setMessages([]);
+      }
+      setDeleteTarget(null);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete chat");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const handleSend = useCallback(
     async (text: string) => {
-      if (!activeSession) {
-        // Auto-create session on first message
+      if (!activeConv) return;
+
+      let session = activeSession;
+      if (!session) {
         try {
-          const session = await createSession(text.slice(0, 60));
-          setSessions((prev) => [session, ...prev]);
+          const scope =
+            activeConv.type === "group"
+              ? { groupId: activeConv.id }
+              : { singleChatId: activeConv.id };
+          session = await createSession({
+            title: text.slice(0, 60),
+            ...scope,
+          });
           setActiveSession(session);
-          await doSend(session.threadId, text);
         } catch {
-          // ignore
+          return;
         }
-        return;
       }
-      await doSend(activeSession.threadId, text);
+
+      await doSend(session.threadId, text);
     },
-    [activeSession],
+    [activeConv, activeSession],
   );
 
   async function doSend(threadId: string, text: string) {
@@ -79,11 +393,68 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMsg]);
     setSending(true);
 
+    const requestId = crypto.randomUUID();
+
+    // Detect @mention of the agent in group chats
+    const isGroup = activeConv?.type === "group";
+    const agentDef = isGroup ? activeConv?.agentDefinition : null;
+    const mentionsAgent = !isGroup || (
+      agentDef
+        ? text.toLowerCase().includes(`@${agentDef.toLowerCase()}`)
+        : text.includes("@")
+    );
+
+    const scope = activeConv
+      ? {
+          ...(isGroup
+            ? { groupId: activeConv.id }
+            : { singleChatId: activeConv.id }),
+          ...(activeConv.agentId ? { agentId: activeConv.agentId } : {}),
+          mentionsAgent,
+        }
+      : undefined;
+
+    // Group message without @mention — fire and forget (no agent reply expected)
+    if (isGroup && !mentionsAgent) {
+      try {
+        await sendMessage(threadId, text, requestId, scope);
+      } catch {
+        // stored silently
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    // Agent is expected to reply — wait for it
+    const replyPromise = new Promise<ChatReplyPayload>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        pendingReplies.current.delete(requestId);
+        reject(new Error("Timed out waiting for assistant reply."));
+      }, 120_000);
+
+      pendingReplies.current.set(requestId, (p) => {
+        window.clearTimeout(timeout);
+        resolve(p);
+      });
+    });
+
     try {
-      const res = await sendMessage(threadId, text);
-      const assistantMsg: Message = { role: "assistant", content: res.reply };
-      setMessages((prev) => [...prev, assistantMsg]);
+      await sendMessage(threadId, text, requestId, scope);
+      const p = await replyPromise;
+      if (p.ok) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: p.reply },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `Error: ${p.error}` },
+        ]);
+      }
     } catch (err: unknown) {
+      pendingReplies.current.delete(requestId);
       const errorText =
         err instanceof Error ? err.message : "Something went wrong";
       setMessages((prev) => [
@@ -95,32 +466,51 @@ export default function ChatPage() {
     }
   }
 
+  const convName = activeConv?.name || "Select a conversation";
+  const agentIsTyping = activeConv
+    ? typingConversations.has(activeConv.id)
+    : false;
+
+  // Names of users currently typing in the active group
+  const usersTypingNames: string[] = activeConv?.type === "group"
+    ? Array.from(userTyping.get(activeConv.id)?.values() ?? [])
+    : [];
+
+  const handleUserTyping = useCallback(() => {
+    if (activeConv?.type === "group") {
+      emitUserTyping(activeConv.id);
+    }
+  }, [activeConv?.type, activeConv?.id]);
+
+  // API already returns only unattached agents
+  const filteredAgents = availableAgents;
+
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-gray-50/50">
       {/* Mobile sidebar toggle */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="fixed left-3 top-3 z-30 rounded-lg border border-gray-200 bg-white p-2 shadow-sm sm:hidden"
+        className="fixed left-3 top-3 z-30 rounded-xl border border-gray-200/80 bg-white/90 p-2.5 shadow-glass backdrop-blur-sm transition-all duration-200 hover:shadow-md sm:hidden active:scale-95"
       >
-        <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-        </svg>
+        <Menu className="h-5 w-5 text-gray-600" />
       </button>
 
       {/* Sidebar */}
       <div
-        className={`fixed inset-y-0 left-0 z-20 transform transition-transform sm:relative sm:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-20 transform transition-transform duration-300 ease-out sm:relative sm:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <SessionSidebar
-          sessions={sessions}
-          activeSessionId={activeSession?.id ?? null}
-          onSelectSession={(s) => {
-            setActiveSession(s);
-            setSidebarOpen(false);
-          }}
-          onNewChat={handleNewChat}
+          groups={conversations?.groups ?? []}
+          singleChats={conversations?.singleChats ?? []}
+          activeConversationId={activeConv?.id ?? null}
+          unreadCounts={unreadCounts}
+          typingConversations={typingConversations}
+          isAdmin={user?.id === "SYSTEM"}
+          onSelectConversation={handleSelectConversation}
+          onNewChat={handleOpenNewChat}
+          onDeleteChat={(id, title) => setDeleteTarget({ id, title })}
           onLogout={logout}
           userName={user?.displayName ?? user?.id ?? null}
         />
@@ -129,61 +519,149 @@ export default function ChatPage() {
       {/* Overlay on mobile */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-10 bg-black/20 sm:hidden"
+          className="fixed inset-0 z-10 bg-black/20 backdrop-blur-sm sm:hidden animate-fade-in"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Main Chat Area */}
-      <main className="flex flex-1 flex-col">
+      <main className="flex flex-1 flex-col bg-white">
         {/* Chat Header */}
-        <header className="flex items-center border-b border-gray-200 px-4 py-3 sm:px-6">
-          <div className="ml-10 sm:ml-0">
-            <h2 className="text-sm font-semibold text-gray-900">
-              {activeSession?.title || "New Conversation"}
+        <header className="flex items-center justify-between border-b border-gray-100 bg-white/80 px-4 py-3.5 backdrop-blur-xl sm:px-6">
+          <div className="ml-10 sm:ml-0 min-w-0 flex-1 mr-3">
+            <h2 className="text-sm font-semibold text-gray-900 tracking-tight">
+              {convName}
             </h2>
-            <p className="text-xs text-gray-400">
-              Scheduling Assistant
-            </p>
+            {agentIsTyping ? (
+              <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                Agent is typing...
+              </p>
+            ) : usersTypingNames.length > 0 ? (
+              <p className="flex items-center gap-1.5 text-xs font-medium text-blue-600">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+                </span>
+                {usersTypingNames.length === 1
+                  ? `${usersTypingNames[0]} is typing...`
+                  : `${usersTypingNames.join(", ")} are typing...`}
+              </p>
+            ) : activeConv?.type === "group" ? (
+              <p className="text-xs text-gray-400 truncate">
+                {[
+                  activeConv.agentDefinition,
+                  groupMembersList.length > 0
+                    ? groupMembersList.map((m) => m.displayName || m.userId).join(", ")
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" \u00B7 ") || "Group Chat"}
+              </p>
+            ) : (
+              <p className="text-xs text-gray-400">
+                {activeConv?.type === "single"
+                  ? "Direct Chat"
+                  : "Default Chat"}
+              </p>
+            )}
           </div>
+          {activeConv && user?.id === "SYSTEM" ? (
+            <ModelSelector
+              currentModel={activeConv.model}
+              conversationType={activeConv.type}
+              conversationId={activeConv.id}
+              onModelChanged={(m: ConversationModelInfo) => {
+                setActiveConv((prev) =>
+                  prev ? { ...prev, model: m } : prev,
+                );
+                const conv = activeConvRef.current;
+                if (!conv) return;
+                setConversations((c) => {
+                  if (!c) return c;
+                  if (conv.type === "single") {
+                    return {
+                      ...c,
+                      singleChats: c.singleChats.map((sc) =>
+                        sc.id === conv.id ? { ...sc, model: m } : sc,
+                      ),
+                    };
+                  }
+                  return {
+                    ...c,
+                    groups: c.groups.map((g) =>
+                      g.id === conv.id ? { ...g, model: m } : g,
+                    ),
+                  };
+                });
+              }}
+            />
+          ) : activeConv?.model ? (
+            <VendorModelBadge model={activeConv.model} />
+          ) : null}
         </header>
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-          {messages.length === 0 && !sending && (
-            <div className="flex h-full flex-col items-center justify-center text-center">
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50">
-                <svg className="h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-                </svg>
+          {!activeConv && !sending && (
+            <div className="flex h-full flex-col items-center justify-center text-center animate-fade-in">
+              <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 shadow-glass">
+                <Sparkles className="h-9 w-9 text-indigo-400" />
               </div>
-              <h3 className="mb-1 text-lg font-semibold text-gray-900">
-                How can I help you today?
+              <h3 className="mb-1.5 text-lg font-bold text-gray-900 tracking-tight">
+                Select a conversation
               </h3>
-              <p className="max-w-sm text-sm text-gray-500">
-                Ask me anything about your schedule, meetings, availability, or
-                time-off requests.
+              <p className="max-w-xs text-sm text-gray-500 leading-relaxed">
+                Choose a group or direct chat from the sidebar to start
+                messaging.
               </p>
             </div>
           )}
 
-          <div className="mx-auto max-w-3xl space-y-4">
+          {activeConv && loadingHistory && (
+            <div className="flex h-full flex-col items-center justify-center animate-fade-in">
+              <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
+              <p className="mt-3 text-sm text-gray-400">
+                Loading conversation...
+              </p>
+            </div>
+          )}
+
+          {activeConv &&
+            messages.length === 0 &&
+            !sending &&
+            !loadingHistory && (
+              <div className="flex h-full flex-col items-center justify-center text-center animate-fade-in">
+                <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 shadow-glass">
+                  <Sparkles className="h-9 w-9 text-indigo-400" />
+                </div>
+                <h3 className="mb-1.5 text-lg font-bold text-gray-900 tracking-tight">
+                  {convName}
+                </h3>
+                <p className="max-w-xs text-sm text-gray-500 leading-relaxed">
+                  Send a message to start the conversation.
+                </p>
+              </div>
+            )}
+
+          <div className="mx-auto max-w-3xl space-y-5">
             {messages.map((msg, i) => (
-              <ChatMessage key={i} role={msg.role} content={msg.content} />
+              <ChatMessage key={i} role={msg.role} content={msg.content} senderName={msg.senderName} />
             ))}
 
-            {sending && (
-              <div className="flex justify-start">
-                <div className="mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                  </svg>
+            {(sending || agentIsTyping) && (
+              <div className="flex justify-start animate-fade-in">
+                <div className="mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-indigo-200">
+                  <Sparkles className="h-4 w-4" />
                 </div>
-                <div className="rounded-2xl bg-gray-100 px-4 py-3">
-                  <div className="flex gap-1">
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
+                <div className="rounded-2xl rounded-tl-md bg-white px-4 py-3 shadow-glass ring-1 ring-gray-950/[0.04]">
+                  <div className="flex gap-1.5">
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-300 [animation-delay:-0.3s]" />
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-300 [animation-delay:-0.15s]" />
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-300" />
                   </div>
                 </div>
               </div>
@@ -194,8 +672,111 @@ export default function ChatPage() {
         </div>
 
         {/* Input Bar */}
-        <ChatInput onSend={handleSend} disabled={sending} />
+        <ChatInput
+          onSend={handleSend}
+          onTyping={handleUserTyping}
+          disabled={sending || !activeConv}
+          placeholder={
+            activeConv?.type === "group" && activeConv.agentDefinition
+              ? `Type a message... use @${activeConv.agentDefinition} to ask the agent`
+              : undefined
+          }
+        />
       </main>
+
+      {/* New Chat Modal */}
+      {showNewChat && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm animate-scale-in rounded-t-2xl sm:rounded-2xl border border-gray-200/60 bg-white/95 p-5 sm:p-6 shadow-glass-lg backdrop-blur-xl mx-0 sm:mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">New Chat</h3>
+                <p className="text-xs text-gray-500">
+                  Choose an agent to start a conversation with.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowNewChat(false)}
+                className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {!agentsLoaded ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-gray-300" />
+              </div>
+            ) : filteredAgents.length === 0 ? (
+              <p className="py-6 text-center text-sm text-gray-400">
+                No available agents. Ask an admin to create one first.
+              </p>
+            ) : (
+              <div className="max-h-60 space-y-1 overflow-y-auto">
+                {filteredAgents.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => handleCreateNewChat(a.id)}
+                    disabled={creatingChat}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition-all duration-150 hover:bg-indigo-50/70 active:scale-[0.98] disabled:opacity-50"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-sm">
+                      <Sparkles className="h-4 w-4" />
+                    </div>
+                    <span className="font-medium text-gray-900">
+                      {a.definition || `Agent ${a.id.slice(0, 8)}`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Chat Confirmation */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm animate-scale-in rounded-t-2xl sm:rounded-2xl border border-gray-200/60 bg-white/95 p-5 sm:p-6 shadow-glass-lg backdrop-blur-xl mx-0 sm:mx-4">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100">
+              <AlertTriangle className="h-6 w-6 text-red-500" />
+            </div>
+            <h3 className="mb-1 text-base font-bold text-gray-900">
+              Delete "{deleteTarget.title}"?
+            </h3>
+            <p className="mb-5 text-sm text-gray-500 leading-relaxed">
+              This will permanently delete{" "}
+              <strong className="text-gray-700">
+                all conversation history
+              </strong>
+              ,{" "}
+              <strong className="text-gray-700">agent memory</strong>, and{" "}
+              <strong className="text-gray-700">episodic context</strong>{" "}
+              associated with this chat. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2.5">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-red-700 active:scale-[0.98] disabled:opacity-50"
+              >
+                {deleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Delete permanently"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

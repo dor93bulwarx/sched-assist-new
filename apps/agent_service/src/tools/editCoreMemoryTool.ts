@@ -3,9 +3,9 @@ import { z } from "zod";
 import { updateCoreMemory } from "../memory/coreMemoryManager";
 
 /**
- * LangChain tool that lets the scheduling agent autonomously update an
- * employee's core memory file — the persistent `.md` rules stored on the
- * Docker volume at `/data/employees/{empId}/core_memory.md`.
+ * LangChain tool that lets the scheduling agent autonomously update a
+ * user's core memory file — the persistent `.md` rules stored on the
+ * Docker volume at `/data/users/{userId}/core_memory.md`.
  *
  * Use this tool for **permanent** scheduling preferences (e.g. "Works from
  * home on Wednesdays", "Never schedule before 9 AM").  Do **not** use it
@@ -13,28 +13,28 @@ import { updateCoreMemory } from "../memory/coreMemoryManager";
  */
 export const editCoreMemoryTool = tool(
   async (input) => {
-    const { empId, action, content } = input;
+    const { userId, action, content } = input;
 
-    const success = await updateCoreMemory(empId, action, content);
+    const success = await updateCoreMemory(userId, action, content);
 
     if (success) {
-      return `Core memory for employee "${empId}" has been updated (action: ${action}).`;
+      return `Core memory for user "${userId}" has been updated (action: ${action}).`;
     }
-    return `Failed to update core memory for employee "${empId}". Check logs for details.`;
+    return `Failed to update core memory for user "${userId}". Check logs for details.`;
   },
   {
     name: "edit_core_memory",
     description:
-      "Updates the employee's persistent core memory file with permanent scheduling " +
+      "Updates the user's persistent core memory file with permanent scheduling " +
       "rules or preferences. Use 'append' to add a new rule to the existing file, or " +
       "'rewrite' to replace the entire file when rules need major restructuring. " +
       "Only use this for PERMANENT preferences (e.g. 'Always block 12-1 PM for lunch', " +
       "'Prefers morning meetings'). Do NOT use for one-time events or transient reminders — " +
       "those go into episodic memory instead.",
     schema: z.object({
-      empId: z
+      userId: z
         .string()
-        .describe("The unique employee identifier (emp_id) whose core memory to update."),
+        .describe("The unique user identifier (`users.id`) whose core memory to update."),
       action: z
         .enum(["append", "rewrite"])
         .describe(

@@ -12,10 +12,17 @@ module.exports = {
         primaryKey: true,
         allowNull: false,
       },
-      emp_id: {
+      user_id: {
         type: Sequelize.STRING,
         allowNull: false,
-        references: { model: "employees", key: "id" },
+        references: { model: "users", key: "id" },
+        onUpdate: "CASCADE",
+        onDelete: "CASCADE",
+      },
+      thread_id: {
+        type: Sequelize.STRING,
+        allowNull: false,
+        references: { model: "threads", key: "thread_id" },
         onUpdate: "CASCADE",
         onDelete: "CASCADE",
       },
@@ -44,18 +51,21 @@ module.exports = {
       `ALTER TABLE episodic_memory
        ALTER COLUMN embedding
        TYPE vector(${EMBEDDING_DIMENSION})
-       USING embedding::vector(${EMBEDDING_DIMENSION});`
+       USING embedding::vector(${EMBEDDING_DIMENSION});`,
     );
 
-    await queryInterface.addIndex("episodic_memory", ["emp_id"], {
-      name: "episodic_memory_emp_id",
+    await queryInterface.addIndex("episodic_memory", ["user_id"], {
+      name: "episodic_memory_user_id",
+    });
+    await queryInterface.addIndex("episodic_memory", ["thread_id"], {
+      name: "episodic_memory_thread_id",
     });
 
     // HNSW index for fast approximate nearest-neighbour search (cosine distance).
     await queryInterface.sequelize.query(
       `CREATE INDEX IF NOT EXISTS episodic_memory_embedding_idx
        ON episodic_memory
-       USING hnsw (embedding vector_cosine_ops);`
+       USING hnsw (embedding vector_cosine_ops);`,
     );
   },
 
