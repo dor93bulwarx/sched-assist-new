@@ -487,7 +487,7 @@ export default function ChatPage() {
   const filteredAgents = availableAgents;
 
   return (
-    <div className="flex h-screen bg-gray-50/50">
+    <div className="flex h-dvh bg-gray-50/50 overflow-hidden">
       {/* Mobile sidebar toggle — hidden when sidebar is open */}
       {!sidebarOpen && (
         <button
