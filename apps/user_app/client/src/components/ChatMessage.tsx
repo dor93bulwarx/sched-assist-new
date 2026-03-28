@@ -18,13 +18,17 @@ interface ChatMessageProps {
   senderName?: string;
   /** Vendor slug for the model (used to show vendor icon on assistant messages). */
   vendorSlug?: string | null;
+  /** Whether this message is in a group chat — enables sender labels. */
+  isGroup?: boolean;
 }
 
-export default function ChatMessage({ role, content, senderName, vendorSlug }: ChatMessageProps) {
+export default function ChatMessage({ role, content, senderName, vendorSlug, isGroup }: ChatMessageProps) {
   const isUser = role === "user";
   const isError = !isUser && content.startsWith("Error:");
   // Messages from other group members: role is "user" but senderName is set
   const isOtherUser = isUser && !!senderName;
+  // Current user's own message in a group chat
+  const isSelfInGroup = isUser && !isOtherUser && isGroup;
 
   return (
     <div
@@ -51,8 +55,10 @@ export default function ChatMessage({ role, content, senderName, vendorSlug }: C
         </div>
       )}
       {isOtherUser && (
-        <div className="mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 text-xs font-bold text-indigo-600 shadow-sm ring-1 ring-indigo-100">
-          {senderName.charAt(0).toUpperCase()}
+        <div className="mr-3 flex flex-col items-center gap-1 flex-shrink-0">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 text-xs font-bold text-indigo-600 shadow-sm ring-1 ring-indigo-100">
+            {senderName.charAt(0).toUpperCase()}
+          </div>
         </div>
       )}
 
@@ -68,22 +74,29 @@ export default function ChatMessage({ role, content, senderName, vendorSlug }: C
           </p>
         </div>
       ) : isOtherUser ? (
-        <div className="max-w-[88%] sm:max-w-[75%] rounded-2xl rounded-tl-md bg-white px-4 py-3 text-sm text-gray-800 shadow-glass ring-1 ring-gray-950/[0.04]">
-          <p className="mb-1 text-[10px] font-semibold text-indigo-500">{senderName}</p>
-          <div className="chat-prose">
-            <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+        <div className="max-w-[88%] sm:max-w-[75%]">
+          <p className="mb-1 ml-1 text-[11px] font-semibold text-indigo-500">{senderName}</p>
+          <div className="rounded-2xl rounded-tl-md bg-white px-4 py-3 text-sm text-gray-800 shadow-glass ring-1 ring-gray-950/[0.04]">
+            <div className="chat-prose">
+              <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+            </div>
           </div>
         </div>
       ) : (
-        <div
-          className={`max-w-[88%] sm:max-w-[75%] text-sm ${
-            isUser
-              ? "rounded-2xl rounded-tr-md bg-gradient-to-br from-blue-600 to-indigo-600 px-4 py-3 text-white shadow-md shadow-blue-200/50"
-              : "rounded-2xl rounded-tl-md bg-white px-4 py-3 text-gray-800 shadow-glass ring-1 ring-gray-950/[0.04]"
-          }`}
-        >
-          <div className={`chat-prose ${isUser ? "chat-prose-user" : ""}`}>
-            <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+        <div className="max-w-[88%] sm:max-w-[75%]">
+          {isSelfInGroup && (
+            <p className="mb-1 mr-1 text-right text-[11px] font-semibold text-gray-400">You</p>
+          )}
+          <div
+            className={`text-sm ${
+              isUser
+                ? "rounded-2xl rounded-tr-md bg-gradient-to-br from-blue-600 to-indigo-600 px-4 py-3 text-white shadow-md shadow-blue-200/50"
+                : "rounded-2xl rounded-tl-md bg-white px-4 py-3 text-gray-800 shadow-glass ring-1 ring-gray-950/[0.04]"
+            }`}
+          >
+            <div className={`chat-prose ${isUser ? "chat-prose-user" : ""}`}>
+              <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+            </div>
           </div>
         </div>
       )}

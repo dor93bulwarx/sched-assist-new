@@ -661,7 +661,7 @@ export default function ChatPage() {
 
           <div className="mx-auto max-w-3xl space-y-5">
             {messages.map((msg, i) => (
-              <ChatMessage key={i} role={msg.role} content={msg.content} senderName={msg.senderName} vendorSlug={activeConv?.model?.vendor?.slug} />
+              <ChatMessage key={i} role={msg.role} content={msg.content} senderName={msg.senderName} vendorSlug={activeConv?.model?.vendor?.slug} isGroup={activeConv?.type === "group"} />
             ))}
 
             {(sending || agentIsTyping) && (

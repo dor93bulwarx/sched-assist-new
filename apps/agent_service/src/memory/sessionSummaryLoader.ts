@@ -29,7 +29,7 @@ export async function loadRecentSessionSummaries(
 
   const threadFilter =
     excludeThreadId != null && excludeThreadId !== ""
-      ? { threadId: { [Op.ne]: excludeThreadId } }
+      ? { id: { [Op.ne]: excludeThreadId } }
       : {};
 
   try {
