@@ -1,23 +1,20 @@
 "use strict";
 
 /**
- * 1. Seed a default agent
- * 2. Seed a system admin user (password: "admin123" — change in production)
- * 3. Make groups.agent_id NOT NULL (backfill existing rows with the default agent first)
+ * 1. Seed a system admin user (password: "Sys@dm1n!2026#Gr4hamy")
+ * 2. Make groups.agent_id NOT NULL (backfill existing rows first)
  *
  * @type {import('sequelize-cli').Migration}
  */
 module.exports = {
   async up(queryInterface, Sequelize) {
-
-
     // 1. Insert system admin user
-    //    Password "admin123" hashed with bcrypt (10 rounds).
-    //    The hash below is pre-computed; the app uses bcrypt.compare at login.
+    //    Password "Sys@dm1n!2026#Gr4hamy" hashed with bcrypt (10 rounds).
+    //    Meets policy: 8+ chars, uppercase, lowercase, digit, special char.
+    //    CHANGE THIS IN PRODUCTION via a direct DB update.
     const bcryptHash =
-      "$2b$10$m925iSSJEQXkPR1Zd3I9DOImWOzxcAerzPb2D6389TpMfyXsvZuXC";
+      "$2b$10$ntns1t390KhW5VJCrBKlV.5csFRPG3/RmYVKW8BSJJ1EhoWZ8YMm.";
 
-    // We use raw SQL so we can use the same default-value expression the table uses.
     await queryInterface.sequelize.query(
       `INSERT INTO users (id, display_name, user_identity, password, created_at, updated_at)
        VALUES ('SYSTEM', 'System Admin', '{"role":"admin"}'::jsonb, :password, NOW(), NOW())
@@ -27,8 +24,7 @@ module.exports = {
 
     // 2. Backfill any existing groups that have NULL agent_id
     await queryInterface.sequelize.query(
-      `UPDATE groups SET agent_id = :agentId WHERE agent_id IS NULL`,
-      { replacements: { agentId: DEFAULT_AGENT_ID } },
+      `UPDATE groups SET agent_id = (SELECT id FROM agents LIMIT 1) WHERE agent_id IS NULL`,
     );
 
     // 3. Make agent_id NOT NULL

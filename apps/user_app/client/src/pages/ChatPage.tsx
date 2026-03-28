@@ -6,6 +6,7 @@ import {
   Loader2,
   AlertTriangle,
 } from "lucide-react";
+import { VendorIcon } from "../components/VendorModelBadge";
 import { useAuth } from "../context/AuthContext";
 import {
   getSessions,
@@ -649,13 +650,18 @@ export default function ChatPage() {
 
           <div className="mx-auto max-w-3xl space-y-5">
             {messages.map((msg, i) => (
-              <ChatMessage key={i} role={msg.role} content={msg.content} senderName={msg.senderName} />
+              <ChatMessage key={i} role={msg.role} content={msg.content} senderName={msg.senderName} vendorSlug={activeConv?.model?.vendor?.slug} />
             ))}
 
             {(sending || agentIsTyping) && (
               <div className="flex justify-start animate-fade-in">
-                <div className="mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-indigo-200">
-                  <Sparkles className="h-4 w-4" />
+                <div className={`mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl shadow-sm ring-1 ${
+                  activeConv?.model?.vendor?.slug === "openai" ? "bg-emerald-50 text-emerald-700 ring-emerald-200/60" :
+                  activeConv?.model?.vendor?.slug === "anthropic" ? "bg-amber-50 text-amber-700 ring-amber-200/60" :
+                  activeConv?.model?.vendor?.slug === "google" ? "bg-blue-50 text-blue-700 ring-blue-200/60" :
+                  "bg-gray-100 text-gray-500 ring-gray-200/60"
+                }`}>
+                  <VendorIcon slug={activeConv?.model?.vendor?.slug ?? ""} />
                 </div>
                 <div className="rounded-2xl rounded-tl-md bg-white px-4 py-3 shadow-glass ring-1 ring-gray-950/[0.04]">
                   <div className="flex gap-1.5">

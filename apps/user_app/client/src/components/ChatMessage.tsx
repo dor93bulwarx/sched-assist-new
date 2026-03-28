@@ -1,15 +1,26 @@
-import { Sparkles, User, AlertTriangle } from "lucide-react";
+import { User, AlertTriangle } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { VendorIcon } from "./VendorModelBadge";
+
+const vendorAvatarColors: Record<string, string> = {
+  openai: "bg-emerald-50 text-emerald-700 shadow-emerald-100/50 ring-emerald-200/60",
+  anthropic: "bg-amber-50 text-amber-700 shadow-amber-100/50 ring-amber-200/60",
+  google: "bg-blue-50 text-blue-700 shadow-blue-100/50 ring-blue-200/60",
+};
+
+const defaultAvatarColor = "bg-gray-100 text-gray-500 shadow-gray-100/50 ring-gray-200/60";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
   /** Display name shown above the bubble for group messages from other users. */
   senderName?: string;
+  /** Vendor slug for the model (used to show vendor icon on assistant messages). */
+  vendorSlug?: string | null;
 }
 
-export default function ChatMessage({ role, content, senderName }: ChatMessageProps) {
+export default function ChatMessage({ role, content, senderName, vendorSlug }: ChatMessageProps) {
   const isUser = role === "user";
   const isError = !isUser && content.startsWith("Error:");
   // Messages from other group members: role is "user" but senderName is set
@@ -22,16 +33,20 @@ export default function ChatMessage({ role, content, senderName }: ChatMessagePr
       {/* Left-side avatar: assistant or other group member */}
       {!isUser && (
         <div
-          className={`mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl ${
+          className={`mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl shadow-sm ring-1 ${
             isError
-              ? "bg-red-100 text-red-500"
-              : "bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-indigo-200"
+              ? "bg-red-100 text-red-500 ring-red-200/60"
+              : vendorSlug
+                ? vendorAvatarColors[vendorSlug] ?? defaultAvatarColor
+                : defaultAvatarColor
           }`}
         >
           {isError ? (
             <AlertTriangle className="h-4 w-4" />
+          ) : vendorSlug ? (
+            <VendorIcon slug={vendorSlug} />
           ) : (
-            <Sparkles className="h-4 w-4" />
+            <VendorIcon slug="" />
           )}
         </div>
       )}
