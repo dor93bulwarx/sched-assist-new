@@ -365,6 +365,9 @@ router.post("/groups/:groupId/members", async (req, res) => {
 
 // ── DELETE /api/admin/groups/:groupId/members/:userId ────────────────────────
 router.delete("/groups/:groupId/members/:userId", async (req, res) => {
+  if (req.params.userId === "SYSTEM") {
+    return res.status(403).json({ error: "The system admin cannot be removed from groups." });
+  }
   try {
     const deleted = await GroupMember.destroy({
       where: { groupId: req.params.groupId, userId: req.params.userId },

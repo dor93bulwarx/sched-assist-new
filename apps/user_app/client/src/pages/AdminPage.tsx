@@ -973,7 +973,10 @@ export default function AdminPage() {
               </div>
               {selectedGroup
                 ? `Members of "${selectedGroup.name}"`
-                : "Select a group"}
+                : <>
+                    <span className="hidden sm:inline">Select a group</span>
+                    <span className="sm:hidden">Select a group from the Groups box</span>
+                  </>}
             </h2>
             {selectedGroup ? (
               <>
@@ -1020,13 +1023,15 @@ export default function AdminPage() {
                           ({m.userId})
                         </span>
                       </span>
-                      <button
-                        onClick={() => handleRemoveMember(m.userId)}
-                        className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg bg-red-50 px-2 py-1 sm:px-2.5 text-[11px] font-medium text-red-600 transition hover:bg-red-100"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                        <span className="hidden sm:inline">Remove</span>
-                      </button>
+                      {m.userId !== "SYSTEM" && (
+                        <button
+                          onClick={() => handleRemoveMember(m.userId)}
+                          className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg bg-red-50 px-2 py-1 sm:px-2.5 text-[11px] font-medium text-red-600 transition hover:bg-red-100"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          <span className="hidden sm:inline">Remove</span>
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1035,7 +1040,8 @@ export default function AdminPage() {
               <div className="flex flex-col items-center justify-center py-10">
                 <FolderOpen className="h-8 w-8 text-gray-200 mb-2" />
                 <p className="text-xs text-gray-400">
-                  Click a group on the left to manage its members.
+                  <span className="hidden sm:inline">Click a group on the left to manage its members.</span>
+                  <span className="sm:hidden">Select a group above to manage its members.</span>
                 </p>
               </div>
             )}
