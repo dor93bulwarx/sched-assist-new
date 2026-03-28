@@ -528,7 +528,7 @@ export default function ChatPage() {
       )}
 
       {/* Main Chat Area */}
-      <main className="flex flex-1 flex-col bg-white">
+      <main className="flex min-w-0 flex-1 flex-col bg-white">
         {/* Chat Header */}
         <header className="flex items-center justify-between border-b border-gray-100 bg-white/80 px-4 py-3.5 backdrop-blur-xl sm:px-6">
           <div className="ml-14 sm:ml-0 min-w-0 flex-1 mr-3">
