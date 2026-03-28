@@ -787,8 +787,8 @@ export default function ChatPage() {
       {/* Main Chat Area */}
       <main className="flex min-w-0 flex-1 flex-col bg-white">
         {/* Chat Header */}
-        <header className="flex items-center justify-between border-b border-gray-100 bg-white/80 px-4 py-3.5 backdrop-blur-xl sm:px-6">
-          <div className="ml-14 sm:ml-0 min-w-0 flex-1 mr-3">
+        <header className="flex items-center gap-2 border-b border-gray-100 bg-white/80 px-3 py-3.5 backdrop-blur-xl sm:gap-3 sm:px-6">
+          <div className="ml-14 sm:ml-0 min-w-0 flex-1">
             <h2 className="text-[13px] sm:text-sm font-semibold text-gray-900 tracking-tight truncate">
               {convName}
             </h2>
@@ -814,7 +814,7 @@ export default function ChatPage() {
               <button
                 type="button"
                 onClick={() => setShowGroupInfo(true)}
-                className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                className="mt-0.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
               >
                 <Users className="h-3 w-3" />
                 {groupMembersList.length + 1} members
@@ -871,7 +871,7 @@ export default function ChatPage() {
                   setSearchIdx(-1);
                 }
               }}
-              className={`ml-2 flex-shrink-0 rounded-xl p-2 transition-all duration-200 ${
+              className={`flex-shrink-0 rounded-xl p-2 transition-all duration-200 ${
                 searchOpen
                   ? "bg-indigo-50 text-indigo-600 ring-1 ring-indigo-200/60"
                   : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"

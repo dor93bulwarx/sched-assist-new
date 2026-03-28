@@ -52,11 +52,11 @@ export default function VendorModelBadge({
 
   return (
     <div
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-sm ${colors}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-sm flex-shrink-0 ${colors}`}
       title={`${model.vendor?.name ?? "Unknown"} — ${model.name}`}
     >
       <VendorIcon slug={vendorSlug} />
-      <span>{model.name}</span>
+      <span className="max-w-[5rem] truncate sm:max-w-none">{model.name}</span>
     </div>
   );
 }
