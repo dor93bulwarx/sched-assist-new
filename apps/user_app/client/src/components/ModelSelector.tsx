@@ -72,7 +72,7 @@ export default function ModelSelector({
     "bg-gray-50 text-gray-600 border-gray-200";
 
   return (
-    <div ref={ref} className="relative flex-shrink-0">
+    <div ref={ref} className="relative">
       <button
         onClick={() => {
           setOpen(!open);
