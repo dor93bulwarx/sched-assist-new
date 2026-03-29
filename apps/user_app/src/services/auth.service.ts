@@ -1,8 +1,26 @@
+import fs from "fs";
+import path from "path";
 import bcrypt from "bcrypt";
 import {
   User, Role, Group, GroupMember, SingleChat, Agent, LLMModel, Vendor,
 } from "@scheduling-agent/database";
 import { signToken } from "../middlewares/auth";
+
+type CoreInstructionsFile = {
+  description: string;
+  core_description: string;
+};
+
+let defaultAgentInstructionsCache: CoreInstructionsFile | null = null;
+
+function getDefaultAgentInstructions(): CoreInstructionsFile {
+  if (!defaultAgentInstructionsCache) {
+    const filePath = path.join(__dirname, "../../../coreInstructions.json");
+    const raw = fs.readFileSync(filePath, "utf-8");
+    defaultAgentInstructionsCache = JSON.parse(raw) as CoreInstructionsFile;
+  }
+  return defaultAgentInstructionsCache;
+}
 
 export class AuthService {
   async login(userName: string, password: string) {
@@ -15,9 +33,10 @@ export class AuthService {
     // Ensure the user has at least one single chat with a personal agent
     const existingChats = await SingleChat.findAll({ where: { userId: user.id }, limit: 1 });
     if (existingChats.length === 0) {
+      const defaults = getDefaultAgentInstructions();
       const agent = await Agent.create({
-        definition: `${user.displayName || "User"}'s Agent`,
-        coreInstructions: "You are a helpful AI assistant.",
+        definition: defaults.description,
+        coreInstructions: defaults.core_description,
       });
       const sc = await SingleChat.create({
         userId: user.id,
