@@ -1,3 +1,5 @@
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
 import { User, AlertTriangle } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -44,52 +46,52 @@ function HighlightedText({ text, term }: { text: string; term: string }) {
 interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
-  /** Display name shown above the bubble for group messages from other users. */
   senderName?: string;
-  /** Vendor slug for the model (used to show vendor icon on assistant messages). */
   vendorSlug?: string | null;
-  /** Display name of the model (e.g. "GPT-4o Mini"). */
   modelName?: string | null;
-  /** Whether this message is in a group chat — enables sender labels. */
   isGroup?: boolean;
-  /** Text to highlight within the message (search term). */
   highlightText?: string;
 }
 
 export default function ChatMessage({ role, content, senderName, vendorSlug, modelName, isGroup, highlightText }: ChatMessageProps) {
   const isUser = role === "user";
   const isError = !isUser && content.startsWith("Error:");
-  // Messages from other group members: role is "user" but senderName is set
   const isOtherUser = isUser && !!senderName;
-  // Current user's own message in a group chat
   const isSelfInGroup = isUser && !isOtherUser && isGroup;
 
-  // When highlighting, render plain text with highlights instead of Markdown
   const renderContent = (className?: string) => {
     if (highlightText) {
       return (
-        <div className={className}>
+        <Box className={className} sx={{ overflowWrap: "break-word", wordBreak: "break-word", minWidth: 0 }}>
           <p className="whitespace-pre-wrap">
             <HighlightedText text={content} term={highlightText} />
           </p>
-        </div>
+        </Box>
       );
     }
     return (
-      <div className={className}>
+      <Box className={className} sx={{ overflowWrap: "break-word", wordBreak: "break-word", minWidth: 0 }}>
         <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
-      </div>
+      </Box>
     );
   };
 
   return (
-    <div
-      className={`flex animate-slide-up ${isUser && !isOtherUser ? "justify-end" : "justify-start"}`}
+    <Stack
+      direction="row"
+      className="animate-slide-up"
+      sx={{
+        justifyContent: isUser && !isOtherUser ? "flex-end" : "flex-start",
+      }}
     >
       {/* Left-side avatar: assistant or other group member */}
       {!isUser && (
-        <div className="mr-3 flex flex-col items-center gap-1 flex-shrink-0">
-          <div
+        <Stack
+          alignItems="center"
+          spacing={0.5}
+          sx={{ mr: 1.5, flexShrink: 0 }}
+        >
+          <Box
             className={`flex h-8 w-8 items-center justify-center rounded-xl shadow-sm ring-1 ${
               isError
                 ? "bg-red-100 text-red-500 ring-red-200/60"
@@ -105,63 +107,104 @@ export default function ChatMessage({ role, content, senderName, vendorSlug, mod
             ) : (
               <VendorIcon slug="" />
             )}
-          </div>
+          </Box>
           {modelName && !isError && (
-            <span className="max-w-[4.5rem] truncate text-center text-[9px] font-medium leading-tight text-gray-400">
+            <Box
+              component="span"
+              className="text-center font-medium text-gray-400"
+              sx={{
+                maxWidth: "4.5rem",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontSize: "9px",
+                lineHeight: "tight",
+              }}
+            >
               {modelName}
-            </span>
+            </Box>
           )}
-        </div>
+        </Stack>
       )}
       {isOtherUser && (
-        <div className="mr-3 flex flex-col items-center gap-1 flex-shrink-0">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 text-xs font-bold text-indigo-600 shadow-sm ring-1 ring-indigo-100">
+        <Stack
+          alignItems="center"
+          spacing={0.5}
+          sx={{ mr: 1.5, flexShrink: 0 }}
+        >
+          <Box className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 text-xs font-bold text-indigo-600 shadow-sm ring-1 ring-indigo-100">
             {senderName.charAt(0).toUpperCase()}
-          </div>
-        </div>
+          </Box>
+        </Stack>
       )}
 
       {/* Bubble */}
       {isError ? (
-        <div className="max-w-[88%] sm:max-w-[75%] rounded-2xl rounded-tl-md border border-red-200/60 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-800 shadow-sm">
-          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-red-500">
+        <Box
+          className="rounded-2xl rounded-tl-md border border-red-200/60 bg-red-50 shadow-sm"
+          sx={{
+            maxWidth: { xs: "88%", sm: "75%" },
+            px: 2,
+            py: 1.5,
+            fontSize: "0.875rem",
+            lineHeight: "1.625",
+            color: "rgb(153 27 27)",
+            minWidth: 0,
+            overflow: "hidden",
+          }}
+        >
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={0.75}
+            sx={{ mb: 0.75, fontSize: "0.75rem", fontWeight: 600, color: "rgb(239 68 68)" }}
+          >
             <AlertTriangle className="h-3.5 w-3.5" />
-            Error
-          </div>
-          <p className="whitespace-pre-wrap">
+            <span>Error</span>
+          </Stack>
+          <Box
+            component="p"
+            sx={{
+              whiteSpace: "pre-wrap",
+              overflowWrap: "break-word",
+              wordBreak: "break-word",
+              minWidth: 0,
+            }}
+          >
             {content.replace(/^Error:\s*/, "")}
-          </p>
-        </div>
+          </Box>
+        </Box>
       ) : isOtherUser ? (
-        <div className="max-w-[88%] sm:max-w-[75%]">
-          <p className="mb-1 ml-1 text-[11px] font-semibold text-indigo-500">{senderName}</p>
-          <div className="rounded-2xl rounded-tl-md bg-white px-4 py-3 text-sm text-gray-800 shadow-glass ring-1 ring-gray-950/[0.04]">
+        <Box sx={{ maxWidth: { xs: "88%", sm: "75%" }, minWidth: 0 }}>
+          <Box component="p" className="mb-1 ml-1 text-[11px] font-semibold text-indigo-500">{senderName}</Box>
+          <Box className="rounded-2xl rounded-tl-md bg-white px-4 py-3 text-sm text-gray-800 shadow-glass ring-1 ring-gray-950/[0.04]" sx={{ minWidth: 0, overflow: "hidden" }}>
             {renderContent("chat-prose")}
-          </div>
-        </div>
+          </Box>
+        </Box>
       ) : (
-        <div className="max-w-[88%] sm:max-w-[75%]">
+        <Box sx={{ maxWidth: { xs: "88%", sm: "75%" }, minWidth: 0 }}>
           {isSelfInGroup && (
-            <p className="mb-1 mr-1 text-right text-[11px] font-semibold text-gray-400">You</p>
+            <Box component="p" className="mb-1 mr-1 text-right text-[11px] font-semibold text-gray-400">You</Box>
           )}
-          <div
+          <Box
             className={`text-sm ${
               isUser
                 ? "rounded-2xl rounded-tr-md bg-gradient-to-br from-blue-600 to-indigo-600 px-4 py-3 text-white shadow-md shadow-blue-200/50"
                 : "rounded-2xl rounded-tl-md bg-white px-4 py-3 text-gray-800 shadow-glass ring-1 ring-gray-950/[0.04]"
             }`}
+            sx={{ minWidth: 0, overflow: "hidden" }}
           >
             {renderContent(`chat-prose ${isUser ? "chat-prose-user" : ""}`)}
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
 
       {/* Right-side avatar: current user's own messages */}
       {isUser && !isOtherUser && (
-        <div className="ml-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 text-gray-500 shadow-sm ring-1 ring-gray-950/[0.04]">
+        <Box className="ml-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 text-gray-500 shadow-sm ring-1 ring-gray-950/[0.04]">
           <User className="h-4 w-4" />
-        </div>
+        </Box>
       )}
-    </div>
+    </Stack>
   );
 }

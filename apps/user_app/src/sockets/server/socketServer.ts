@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
-import { verifyToken } from "../../middleware/auth";
+import { verifyToken } from "../../middlewares/auth";
 import { MessageNotification, GroupMember, User } from "@scheduling-agent/database";
 import { logger } from "../../logger";
 

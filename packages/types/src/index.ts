@@ -158,6 +158,8 @@ export interface UserAttributes {
   password?: string | null;
   /** FK to `roles.id` — determines the user's access level. */
   roleId?: string | null;
+  /** FK to `agents.id` — the agent auto-created on first login. */
+  defaultAgentId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

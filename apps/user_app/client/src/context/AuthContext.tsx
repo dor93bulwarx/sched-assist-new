@@ -19,6 +19,7 @@ interface User {
   id: string;
   displayName: string | null;
   role: string;
+  defaultAgentId: string | null;
 }
 
 interface AuthContextValue {
@@ -46,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     getMe()
       .then((me) => {
-        setUser({ id: me.id, displayName: me.displayName, role: me.role ?? "user" });
+        setUser({ id: me.id, displayName: me.displayName, role: me.role ?? "user", defaultAgentId: me.defaultAgentId ?? null });
         setConversations(me.conversations);
       })
       .catch(() => {
@@ -58,14 +59,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (userName: string, password: string) => {
     const res = await apiLogin(userName, password);
     localStorage.setItem("token", res.token);
-    setUser({ id: res.user.id, displayName: res.user.displayName, role: res.user.role ?? "user" });
+    setUser({ id: res.user.id, displayName: res.user.displayName, role: res.user.role ?? "user", defaultAgentId: res.user.defaultAgentId ?? null });
     setConversations(res.conversations);
   }, []);
 
   const register = useCallback(async (data: RegisterData) => {
     const res = await apiRegister(data);
     localStorage.setItem("token", res.token);
-    setUser({ id: res.user.id, displayName: res.user.displayName, role: res.user.role ?? "user" });
+    setUser({ id: res.user.id, displayName: res.user.displayName, role: res.user.role ?? "user", defaultAgentId: res.user.defaultAgentId ?? null });
     setConversations(res.conversations);
   }, []);
 

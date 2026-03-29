@@ -1,0 +1,17 @@
+import { Router } from "express";
+import { SessionsController } from "../controllers/sessions.controller";
+import { authMiddleware } from "../middlewares/auth";
+
+const router = Router();
+const sessionsController = new SessionsController();
+
+router.get("/", authMiddleware, sessionsController.getSessions);
+router.post("/", authMiddleware, sessionsController.createSession);
+router.get("/history/:threadId/search", authMiddleware, sessionsController.searchHistory);
+router.get("/history/:threadId", authMiddleware, sessionsController.getHistory);
+router.get("/agents", authMiddleware, sessionsController.getAvailableAgents);
+router.post("/single-chats", authMiddleware, sessionsController.createSingleChat);
+router.delete("/single-chats/:id", authMiddleware, sessionsController.deleteSingleChat);
+router.get("/groups/:groupId/members", authMiddleware, sessionsController.getGroupMembers);
+
+export { router as sessionsRouter };

@@ -24,7 +24,23 @@
       "Bash(find /home/office/Dev/schedassistant -type f -path */api/index.ts)",
       "Bash(./node_modules/.bin/tsc --noEmit -p apps/agent_service/tsconfig.json)",
       "Bash(./node_modules/.bin/tsc --noEmit -p apps/user_app/tsconfig.json)",
-      "Bash(../../../node_modules/.bin/tsc --noEmit)"
+      "Bash(../../../node_modules/.bin/tsc --noEmit)",
+      "Bash(git revert:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(grep -oh \"<[a-z][a-z0-9]*\" /home/office/Dev/schedassistant/apps/user_app/client/src/components/*.tsx)",
+      "Bash(grep -oh \"<[a-z][a-z0-9]*\" /home/office/Dev/schedassistant/apps/user_app/client/src/pages/*.tsx)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(find /home/office/Dev/schedassistant -type f \\\\\\(-name *migration* -o -name *schema* -o -name *docker-compose* \\\\\\))",
+      "Bash(docker exec:*)",
+      "Bash(docker ps:*)",
+      "Bash(curl:*)",
+      "Bash(curl -sv http://localhost:3010/claw/api/auth/login -H 'Content-Type: application/json' -d '{\"\"\"\"userName\"\"\"\":\"\"\"\"systemadmin\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"Sys@dm1n!2026#Gr4hamy\"\"\"\"}')",
+      "Bash(curl -s http://localhost:3010/api/auth/login -H 'Content-Type: application/json' -d '{\"\"\"\"userName\"\"\"\":\"\"\"\"systemadmin\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"Sys@dm1n!2026#Gr4hamy\"\"\"\"}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''role:'''', d.get\\(''''user'''',{}\\).get\\(''''role'''',''''N/A''''\\)\\)\")",
+      "Bash(curl -s http://localhost:3010/api/auth/login -H 'Content-Type: application/json' -d '{\"\"\"\"userName\"\"\"\":\"\"\"\"danz\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"Sys@dm1n!2026#Gr4hamy\"\"\"\"}')",
+      "Bash(find /home/office/Dev/schedassistant/apps/user_app/src -type f \\\\\\(-name *.ts -o -name *.js \\\\\\))",
+      "Bash(find /home/office/Dev/schedassistant/apps/agent_service/src -type f \\\\\\(-name *.ts -o -name *.js \\\\\\))"
     ]
   }
 }

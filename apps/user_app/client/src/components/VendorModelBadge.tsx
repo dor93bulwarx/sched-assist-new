@@ -1,3 +1,5 @@
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
 import type { ConversationModelInfo } from "../api";
 
 export function VendorIcon({ slug }: { slug: string }) {
@@ -51,12 +53,31 @@ export default function VendorModelBadge({
     "bg-gray-50 text-gray-600 border-gray-200 shadow-gray-100/50";
 
   return (
-    <div
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-sm ${colors}`}
+    <Stack
+      direction="row"
+      alignItems="center"
+      className={`rounded-full border font-semibold shadow-sm ${colors}`}
+      sx={{
+        gap: { xs: "4px", sm: "6px" },
+        px: { xs: "8px", sm: "12px" },
+        py: { xs: "4px", sm: "6px" },
+        fontSize: { xs: "10px", sm: "11px" },
+        flexShrink: 0,
+      }}
       title={`${model.vendor?.name ?? "Unknown"} — ${model.name}`}
     >
       <VendorIcon slug={vendorSlug} />
-      <span>{model.name}</span>
-    </div>
+      <Box
+        component="span"
+        sx={{
+          maxWidth: { xs: "5rem", sm: "none" },
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {model.name}
+      </Box>
+    </Stack>
   );
 }

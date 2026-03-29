@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Container from "@mui/material/Container";
 import {
   Menu,
   Sparkles,
@@ -51,12 +54,9 @@ const PAGE_SIZE = 20;
 interface Message {
   role: "user" | "assistant";
   content: string;
-  /** Display name of the sender — set for group messages from other users. */
   senderName?: string;
-  /** Per-message model metadata (set on assistant messages). */
   vendorSlug?: string;
   modelName?: string;
-  /** Absolute index in the full messages array (used for search navigation). */
   _absIndex?: number;
 }
 
@@ -73,7 +73,6 @@ export default function ChatPage() {
   const [typingConversations, setTypingConversations] = useState<Set<string>>(
     new Set(),
   );
-  // Tracks which users are typing in group chats: groupId → Map<userId, displayName>
   const [userTyping, setUserTyping] = useState<Map<string, Map<string, string>>>(
     new Map(),
   );
@@ -89,7 +88,7 @@ export default function ChatPage() {
 
   // Pagination state
   const [totalMessages, setTotalMessages] = useState(0);
-  const [loadedFrom, setLoadedFrom] = useState(0); // absolute index of first loaded message
+  const [loadedFrom, setLoadedFrom] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const hasMoreMessages = loadedFrom > 0;
 
@@ -97,7 +96,7 @@ export default function ChatPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searchIdx, setSearchIdx] = useState(-1); // current result index
+  const [searchIdx, setSearchIdx] = useState(-1);
   const [searching, setSearching] = useState(false);
   useEffect(() => {
     getUnreadCounts()
@@ -109,7 +108,6 @@ export default function ChatPage() {
   const [groupMembersList, setGroupMembersList] = useState<GroupMemberInfo[]>([]);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
 
-  // Fetch group members when a group conversation is selected
   useEffect(() => {
     if (activeConv?.type !== "group") {
       setGroupMembersList([]);
@@ -120,7 +118,6 @@ export default function ChatPage() {
       .catch(() => setGroupMembersList([]));
   }, [activeConv?.id, activeConv?.type]);
 
-  // Helper: transform a history message into our local Message shape
   const sanitize = useCallback(
     (s: string) => s.replace(/[\s<|\\/>]+/g, "_").replace(/^_+|_+$/g, "") || "user",
     [],
@@ -161,7 +158,6 @@ export default function ChatPage() {
     setTotalMessages(0);
     setLoadedFrom(0);
     setLoadingHistory(true);
-    // Reset search when switching conversations
     setSearchOpen(false);
     setSearchQuery("");
     setSearchResults([]);
@@ -211,12 +207,9 @@ export default function ChatPage() {
     };
   }, [activeConv?.id]);
 
-  // Only auto-scroll to bottom when messages are appended (new message), not when prepended (load more).
   const prevMsgCount = useRef(0);
   useEffect(() => {
-    // Scroll to bottom only on initial load or when new messages are appended at the end
     if (messages.length > 0 && messages.length >= prevMsgCount.current) {
-      // Check if this is a prepend (loadMore) by seeing if loadingMore just finished
       if (!loadingMore) {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
       }
@@ -224,7 +217,6 @@ export default function ChatPage() {
     prevMsgCount.current = messages.length;
   }, [messages, loadingMore]);
 
-  // Load more messages when scrolling to top
   const handleLoadMore = useCallback(async () => {
     if (!activeSession || loadingMore || loadedFrom <= 0) return;
     setLoadingMore(true);
@@ -242,7 +234,6 @@ export default function ChatPage() {
         setMessages((prev) => [...olderMessages, ...prev]);
         setLoadedFrom(offset);
 
-        // Restore scroll position after prepending
         requestAnimationFrame(() => {
           if (container) {
             const newScrollHeight = container.scrollHeight;
@@ -257,7 +248,6 @@ export default function ChatPage() {
     }
   }, [activeSession, loadingMore, loadedFrom, toMessage]);
 
-  // IntersectionObserver to detect scroll to top
   useEffect(() => {
     const sentinel = topSentinelRef.current;
     if (!sentinel) return;
@@ -290,7 +280,6 @@ export default function ChatPage() {
     try {
       const { results } = await searchHistory(activeSession.threadId, query.trim());
       setSearchResults(results);
-      // Start at the last (most recent) match
       const idx = results.length > 0 ? results.length - 1 : -1;
       setSearchIdx(idx);
       if (idx >= 0) navigateRef.current(results[idx]);
@@ -302,15 +291,12 @@ export default function ChatPage() {
     }
   }, [activeSession]);
 
-  // Navigate to a search result, loading the page if needed
   const navigateToResult = useCallback(async (result: SearchResult) => {
     if (!activeSession) return;
 
-    // Check if this message is already loaded
     const isLoaded = result.index >= loadedFrom && result.index < loadedFrom + messages.length;
 
     if (!isLoaded) {
-      // Load a page centered around the target index
       const targetOffset = Math.max(0, result.index - Math.floor(PAGE_SIZE / 2));
       setLoadingMore(true);
       try {
@@ -328,7 +314,6 @@ export default function ChatPage() {
       }
     }
 
-    // Scroll to the message after render
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-msg-index="${result.index}"]`);
       if (el) {
@@ -340,7 +325,6 @@ export default function ChatPage() {
   }, [activeSession, loadedFrom, messages.length, toMessage]);
   navigateRef.current = navigateToResult;
 
-  // Navigate between search results
   const handleSearchNav = useCallback((direction: "prev" | "next") => {
     if (searchResults.length === 0) return;
     let next: number;
@@ -383,7 +367,6 @@ export default function ChatPage() {
       if (cb) {
         cb(p);
         pendingReplies.current.delete(p.requestId);
-        // Still mark as seen since the user is actively viewing this conversation
         markConversationSeen(p.conversationId, p.conversationType);
         return;
       }
@@ -415,11 +398,9 @@ export default function ChatPage() {
     }) => {
       const key = `${data.groupId}:${data.userId}`;
 
-      // Clear previous timer for this user
       const prev = userTypingTimers.current.get(key);
       if (prev) clearTimeout(prev);
 
-      // Add typing indicator
       setUserTyping((map) => {
         const next = new Map(map);
         const groupMap = new Map(next.get(data.groupId) ?? []);
@@ -428,7 +409,6 @@ export default function ChatPage() {
         return next;
       });
 
-      // Auto-clear after 3 seconds
       userTypingTimers.current.set(
         key,
         setTimeout(() => {
@@ -459,7 +439,6 @@ export default function ChatPage() {
           { role: "user", content: data.message, senderName: data.displayName },
         ]);
       } else {
-        // Not viewing this group — increment unread count
         setUnreadCounts((prev) => ({
           ...prev,
           [data.groupId]: (prev[data.groupId] ?? 0) + 1,
@@ -473,13 +452,10 @@ export default function ChatPage() {
       data: any;
       actorId?: string;
     }) => {
-      // Don't toast our own actions
       if (data.actorId === user?.id) return;
 
       toast(data.message, "info");
 
-      // Update the active conversation view if it's affected
-      // (conversations state is updated globally in AuthContext)
       const current = activeConvRef.current;
       switch (data.type) {
         case "group_model_changed": {
@@ -652,7 +628,6 @@ export default function ChatPage() {
 
     const requestId = crypto.randomUUID();
 
-    // Detect @mention of the agent in group chats
     const isGroup = activeConv?.type === "group";
     const agentDef = isGroup ? activeConv?.agentDefinition : null;
     const mentionsAgent = !isGroup || (
@@ -671,7 +646,6 @@ export default function ChatPage() {
         }
       : undefined;
 
-    // Group message without @mention — fire and forget (no agent reply expected)
     if (isGroup && !mentionsAgent) {
       try {
         await sendMessage(threadId, text, requestId, scope);
@@ -683,7 +657,6 @@ export default function ChatPage() {
       return;
     }
 
-    // Agent is expected to reply — wait for it
     const replyPromise = new Promise<ChatReplyPayload>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         pendingReplies.current.delete(requestId);
@@ -729,7 +702,6 @@ export default function ChatPage() {
     ? typingConversations.has(activeConv.id)
     : false;
 
-  // Names of users currently typing in the active group
   const usersTypingNames: string[] = activeConv?.type === "group"
     ? Array.from(userTyping.get(activeConv.id)?.values() ?? [])
     : [];
@@ -740,26 +712,41 @@ export default function ChatPage() {
     }
   }, [activeConv?.type, activeConv?.id]);
 
-  // API already returns only unattached agents
   const filteredAgents = availableAgents;
 
   return (
-    <div className="flex h-dvh bg-gray-50/50 overflow-hidden">
+    <Stack direction="row" sx={{ height: "100dvh", bgcolor: "rgb(249 250 251 / 0.5)", overflow: "hidden" }}>
       {/* Mobile sidebar toggle — hidden when sidebar is open */}
       {!sidebarOpen && (
-        <button
+        <Box
+          component="button"
           onClick={() => setSidebarOpen(true)}
-          className="fixed left-3 top-3 z-30 rounded-xl border border-gray-200/80 bg-white/90 p-2.5 shadow-glass backdrop-blur-sm transition-all duration-200 hover:shadow-md sm:hidden active:scale-95"
+          className="rounded-xl border border-gray-200/80 bg-white/90 shadow-glass backdrop-blur-sm transition-all duration-200 hover:shadow-md active:scale-95"
+          sx={{
+            position: "fixed",
+            left: 12,
+            top: 12,
+            zIndex: 30,
+            p: 1.25,
+            display: { xs: "block", sm: "none" },
+          }}
         >
           <Menu className="h-5 w-5 text-gray-600" />
-        </button>
+        </Box>
       )}
 
       {/* Sidebar */}
-      <div
-        className={`fixed inset-y-0 left-0 z-20 transform transition-transform duration-300 ease-out sm:relative sm:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+      <Box
+        sx={{
+          position: { xs: "fixed", sm: "relative" },
+          inset: { xs: "0 auto 0 0" },
+          zIndex: 20,
+          transform: {
+            xs: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+            sm: "translateX(0)",
+          },
+          transition: "transform 300ms ease-out",
+        }}
       >
         <SessionSidebar
           groups={conversations?.groups ?? []}
@@ -767,290 +754,373 @@ export default function ChatPage() {
           activeConversationId={activeConv?.id ?? null}
           unreadCounts={unreadCounts}
           typingConversations={typingConversations}
-          isAdmin={user?.role === "admin"}
+          isAdmin={user?.role === "admin" || user?.role === "super_admin"}
+          defaultAgentId={user?.defaultAgentId ?? null}
           onSelectConversation={handleSelectConversation}
           onNewChat={handleOpenNewChat}
           onDeleteChat={(id, title) => setDeleteTarget({ id, title })}
           onLogout={logout}
           userName={user?.displayName ?? user?.id ?? null}
         />
-      </div>
+      </Box>
 
       {/* Overlay on mobile */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-10 bg-black/20 backdrop-blur-sm sm:hidden animate-fade-in"
+        <Box
+          className="animate-fade-in"
           onClick={() => setSidebarOpen(false)}
+          sx={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10,
+            bgcolor: "rgba(0,0,0,0.2)",
+            backdropFilter: "blur(4px)",
+            display: { xs: "block", sm: "none" },
+          }}
         />
       )}
 
       {/* Main Chat Area */}
-      <main className="flex min-w-0 flex-1 flex-col bg-white">
+      <Stack component="main" sx={{ flex: 1, minWidth: 0, bgcolor: "white" }}>
         {/* Chat Header */}
-        <header className="flex items-center justify-between border-b border-gray-100 bg-white/80 px-4 py-3.5 backdrop-blur-xl sm:px-6">
-          <div className="ml-14 sm:ml-0 min-w-0 flex-1 mr-3">
-            <h2 className="text-[13px] sm:text-sm font-semibold text-gray-900 tracking-tight truncate">
+        <Stack
+          component="header"
+          direction="row"
+          alignItems="center"
+          className="border-b border-gray-100 bg-white/80 backdrop-blur-xl"
+          sx={{
+            px: { xs: 2, sm: 3 },
+            py: 1.75,
+            gap: { xs: 1, sm: 1.5 },
+          }}
+        >
+          <Box
+            sx={{
+              ml: { xs: 7, sm: 0 },
+              minWidth: 0,
+              flex: 1,
+            }}
+          >
+            <Box
+              component="h2"
+              className="font-semibold text-gray-900 tracking-tight"
+              sx={{
+                fontSize: { xs: "13px", sm: "14px" },
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
               {convName}
-            </h2>
+            </Box>
             {agentIsTyping ? (
-              <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-600">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                </span>
-                Agent is typing...
-              </p>
+              <Stack direction="row" alignItems="center" spacing={0.75} className="text-xs font-medium text-emerald-600">
+                <Box component="span" sx={{ position: "relative", display: "flex", width: 8, height: 8 }}>
+                  <Box component="span" className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <Box component="span" className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </Box>
+                <span>Agent is typing...</span>
+              </Stack>
             ) : usersTypingNames.length > 0 ? (
-              <p className="flex items-center gap-1.5 text-xs font-medium text-blue-600">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+              <Stack direction="row" alignItems="center" spacing={0.75} className="text-xs font-medium text-blue-600">
+                <Box component="span" sx={{ position: "relative", display: "flex", width: 8, height: 8 }}>
+                  <Box component="span" className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+                  <Box component="span" className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+                </Box>
+                <span>
+                  {usersTypingNames.length === 1
+                    ? `${usersTypingNames[0]} is typing...`
+                    : `${usersTypingNames.join(", ")} are typing...`}
                 </span>
-                {usersTypingNames.length === 1
-                  ? `${usersTypingNames[0]} is typing...`
-                  : `${usersTypingNames.join(", ")} are typing...`}
-              </p>
+              </Stack>
             ) : activeConv?.type === "group" ? (
-              <button
+              <Stack
+                component="button"
                 type="button"
+                direction="row"
+                alignItems="center"
                 onClick={() => setShowGroupInfo(true)}
-                className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                className="rounded-full bg-gray-100 text-[10px] font-medium text-gray-500 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                sx={{
+                  mt: 0.25,
+                  gap: 0.5,
+                  px: 1,
+                  py: 0.25,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                  width: "fit-content",
+                }}
               >
                 <Users className="h-3 w-3" />
-                {groupMembersList.length + 1} members
+                <span>{groupMembersList.length + 1} members</span>
                 <ChevronRight className="h-2.5 w-2.5" />
-              </button>
+              </Stack>
             ) : (
-              <p className="text-xs text-gray-400">
+              <Box component="p" className="text-xs text-gray-400">
                 {activeConv?.type === "single"
                   ? "Direct Chat"
                   : "Default Chat"}
-              </p>
+              </Box>
             )}
-          </div>
-          {activeConv && user?.role === "admin" ? (
-            <ModelSelector
-              currentModel={activeConv.model}
-              conversationType={activeConv.type}
-              conversationId={activeConv.id}
-              onModelChanged={(m: ConversationModelInfo) => {
-                setActiveConv((prev) =>
-                  prev ? { ...prev, model: m } : prev,
-                );
-                const conv = activeConvRef.current;
-                if (!conv) return;
-                setConversations((c) => {
-                  if (!c) return c;
-                  if (conv.type === "single") {
+          </Box>
+
+          <Stack direction="row" alignItems="center" sx={{ flexShrink: 0, gap: 1 }}>
+            {activeConv && (user?.role === "admin" || user?.role === "super_admin") ? (
+              <ModelSelector
+                currentModel={activeConv.model}
+                conversationType={activeConv.type}
+                conversationId={activeConv.id}
+                onModelChanged={(m: ConversationModelInfo) => {
+                  setActiveConv((prev) =>
+                    prev ? { ...prev, model: m } : prev,
+                  );
+                  const conv = activeConvRef.current;
+                  if (!conv) return;
+                  setConversations((c) => {
+                    if (!c) return c;
+                    if (conv.type === "single") {
+                      return {
+                        ...c,
+                        singleChats: c.singleChats.map((sc) =>
+                          sc.id === conv.id ? { ...sc, model: m } : sc,
+                        ),
+                      };
+                    }
                     return {
                       ...c,
-                      singleChats: c.singleChats.map((sc) =>
-                        sc.id === conv.id ? { ...sc, model: m } : sc,
+                      groups: c.groups.map((g) =>
+                        g.id === conv.id ? { ...g, model: m } : g,
                       ),
                     };
+                  });
+                }}
+              />
+            ) : activeConv?.model ? (
+              <VendorModelBadge model={activeConv.model} />
+            ) : null}
+            {activeConv && (
+              <Box
+                component="button"
+                onClick={() => {
+                  setSearchOpen((v) => !v);
+                  if (searchOpen) {
+                    setSearchQuery("");
+                    setSearchResults([]);
+                    setSearchIdx(-1);
                   }
-                  return {
-                    ...c,
-                    groups: c.groups.map((g) =>
-                      g.id === conv.id ? { ...g, model: m } : g,
-                    ),
-                  };
-                });
-              }}
-            />
-          ) : activeConv?.model ? (
-            <VendorModelBadge model={activeConv.model} />
-          ) : null}
-          {activeConv && (
-            <button
-              onClick={() => {
-                setSearchOpen((v) => !v);
-                if (searchOpen) {
-                  setSearchQuery("");
-                  setSearchResults([]);
-                  setSearchIdx(-1);
-                }
-              }}
-              className={`ml-2 flex-shrink-0 rounded-xl p-2 transition-all duration-200 ${
-                searchOpen
-                  ? "bg-indigo-50 text-indigo-600 ring-1 ring-indigo-200/60"
-                  : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-              }`}
-              title="Search in chat"
-            >
-              <Search className="h-4 w-4" />
-            </button>
-          )}
-        </header>
+                }}
+                className={`flex-shrink-0 rounded-xl p-2 transition-all duration-200 ${
+                  searchOpen
+                    ? "bg-indigo-50 text-indigo-600 ring-1 ring-indigo-200/60"
+                    : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                }`}
+                title="Search in chat"
+              >
+                <Search className="h-4 w-4" />
+              </Box>
+            )}
+          </Stack>
+        </Stack>
 
         {/* Search Bar */}
         {searchOpen && activeConv && (
-          <div className="flex items-center justify-center border-b border-gray-100 bg-gray-50/80 px-4 py-2 sm:px-6 animate-slide-up">
-            <div className="flex items-center gap-2 w-full max-w-xl rounded-full bg-white px-4 py-1.5 ring-1 ring-gray-200/80 shadow-sm">
-            <Search className="h-4 w-4 flex-shrink-0 text-gray-400" />
-            <input
-              autoFocus
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSearchQuery(val);
-                clearTimeout(searchTimer.current);
-                if (!val.trim()) {
-                  setSearchResults([]);
-                  setSearchIdx(-1);
-                  return;
-                }
-                searchTimer.current = setTimeout(() => handleSearch(val), 300);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="center"
+            className="border-b border-gray-100 bg-gray-50/80 animate-slide-up"
+            sx={{ px: { xs: 2, sm: 3 }, py: 1 }}
+          >
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              className="rounded-full bg-white ring-1 ring-gray-200/80 shadow-sm"
+              sx={{ width: "100%", maxWidth: "36rem", px: 2, py: 0.75 }}
+            >
+              <Search className="h-4 w-4 flex-shrink-0 text-gray-400" />
+              <Box
+                component="input"
+                autoFocus
+                type="text"
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  clearTimeout(searchTimer.current);
+                  if (!val.trim()) {
+                    setSearchResults([]);
+                    setSearchIdx(-1);
+                    return;
+                  }
+                  searchTimer.current = setTimeout(() => handleSearch(val), 300);
+                }}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === "Escape") {
+                    setSearchOpen(false);
+                    setSearchQuery("");
+                    setSearchResults([]);
+                    setSearchIdx(-1);
+                  } else if (e.key === "Enter") {
+                    handleSearchNav(e.shiftKey ? "prev" : "next");
+                  }
+                }}
+                placeholder="Search messages..."
+                className="bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none"
+                sx={{ flex: 1, minWidth: 0 }}
+              />
+              {searching && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+              {searchResults.length > 0 && (
+                <Stack direction="row" alignItems="center" spacing={0.5}>
+                  <Box component="span" className="text-xs text-gray-500 tabular-nums" sx={{ whiteSpace: "nowrap" }}>
+                    {searchIdx + 1} / {searchResults.length}
+                  </Box>
+                  <Box
+                    component="button"
+                    onClick={() => handleSearchNav("prev")}
+                    className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition"
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </Box>
+                  <Box
+                    component="button"
+                    onClick={() => handleSearchNav("next")}
+                    className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </Box>
+                </Stack>
+              )}
+              {searchQuery && searchResults.length === 0 && !searching && (
+                <Box component="span" className="text-xs text-gray-400" sx={{ whiteSpace: "nowrap" }}>No results</Box>
+              )}
+              <Box
+                component="button"
+                onClick={() => {
                   setSearchOpen(false);
                   setSearchQuery("");
                   setSearchResults([]);
                   setSearchIdx(-1);
-                } else if (e.key === "Enter") {
-                  handleSearchNav(e.shiftKey ? "prev" : "next");
-                }
-              }}
-              placeholder="Search messages..."
-              className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none"
-            />
-            {searching && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-            {searchResults.length > 0 && (
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
-                  {searchIdx + 1} / {searchResults.length}
-                </span>
-                <button
-                  onClick={() => handleSearchNav("prev")}
-                  className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition"
-                >
-                  <ChevronUp className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={() => handleSearchNav("next")}
-                  className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition"
-                >
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            {searchQuery && searchResults.length === 0 && !searching && (
-              <span className="text-xs text-gray-400">No results</span>
-            )}
-            <button
-              onClick={() => {
-                setSearchOpen(false);
-                setSearchQuery("");
-                setSearchResults([]);
-                setSearchIdx(-1);
-              }}
-              className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-            </div>
-          </div>
+                }}
+                className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Box>
+            </Stack>
+          </Stack>
         )}
 
         {/* Messages Area */}
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+        <Box
+          ref={scrollContainerRef}
+          sx={{
+            flex: 1,
+            overflowY: "auto",
+            px: { xs: 2, sm: 3 },
+            py: 3,
+          }}
+        >
           {!activeConv && !sending && (
-            <div className="flex h-full flex-col items-center justify-center text-center animate-fade-in">
-              <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 shadow-glass">
+            <Stack alignItems="center" justifyContent="center" className="animate-fade-in" sx={{ height: "100%", textAlign: "center" }}>
+              <Box className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 shadow-glass">
                 <Sparkles className="h-9 w-9 text-indigo-400" />
-              </div>
-              <h3 className="mb-1.5 text-lg font-bold text-gray-900 tracking-tight">
+              </Box>
+              <Box component="h3" className="mb-1.5 text-lg font-bold text-gray-900 tracking-tight">
                 Select a conversation
-              </h3>
-              <p className="max-w-xs text-sm text-gray-500 leading-relaxed">
-                Choose a group or direct chat from the sidebar to start
-                messaging.
-              </p>
-            </div>
+              </Box>
+              <Box component="p" className="text-sm text-gray-500 leading-relaxed" sx={{ maxWidth: "20rem" }}>
+                Choose a group or direct chat from the sidebar to start messaging.
+              </Box>
+            </Stack>
           )}
 
           {activeConv && loadingHistory && (
-            <div className="flex h-full flex-col items-center justify-center animate-fade-in">
+            <Stack alignItems="center" justifyContent="center" className="animate-fade-in" sx={{ height: "100%" }}>
               <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
-              <p className="mt-3 text-sm text-gray-400">
+              <Box component="p" className="mt-3 text-sm text-gray-400">
                 Loading conversation...
-              </p>
-            </div>
+              </Box>
+            </Stack>
           )}
 
           {activeConv &&
             messages.length === 0 &&
             !sending &&
             !loadingHistory && (
-              <div className="flex h-full flex-col items-center justify-center text-center animate-fade-in">
-                <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 shadow-glass">
+              <Stack alignItems="center" justifyContent="center" className="animate-fade-in" sx={{ height: "100%", textAlign: "center" }}>
+                <Box className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 shadow-glass">
                   <Sparkles className="h-9 w-9 text-indigo-400" />
-                </div>
-                <h3 className="mb-1.5 text-lg font-bold text-gray-900 tracking-tight">
+                </Box>
+                <Box component="h3" className="mb-1.5 text-lg font-bold text-gray-900 tracking-tight">
                   {convName}
-                </h3>
-                <p className="max-w-xs text-sm text-gray-500 leading-relaxed">
+                </Box>
+                <Box component="p" className="text-sm text-gray-500 leading-relaxed" sx={{ maxWidth: "20rem" }}>
                   Send a message to start the conversation.
-                </p>
-              </div>
+                </Box>
+              </Stack>
             )}
 
-          <div className="mx-auto max-w-3xl space-y-5">
-            {/* Top sentinel for infinite scroll */}
-            <div ref={topSentinelRef} className="h-1" />
+          <Container maxWidth="md" disableGutters>
+            <Stack spacing={2.5}>
+              {/* Top sentinel for infinite scroll */}
+              <Box ref={topSentinelRef} sx={{ height: 4 }} />
 
-            {/* Load more indicator */}
-            {loadingMore && (
-              <div className="flex justify-center py-3 animate-fade-in">
-                <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
-              </div>
-            )}
-            {hasMoreMessages && !loadingMore && (
-              <div className="flex justify-center">
-                <button
-                  onClick={handleLoadMore}
-                  className="rounded-full bg-gray-100 px-3 py-1 text-[11px] font-medium text-gray-500 transition hover:bg-gray-200 hover:text-gray-700"
-                >
-                  Load older messages
-                </button>
-              </div>
-            )}
+              {/* Load more indicator */}
+              {loadingMore && (
+                <Stack justifyContent="center" alignItems="center" className="animate-fade-in" sx={{ py: 1.5 }}>
+                  <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
+                </Stack>
+              )}
+              {hasMoreMessages && !loadingMore && (
+                <Stack alignItems="center">
+                  <Box
+                    component="button"
+                    onClick={handleLoadMore}
+                    className="rounded-full bg-gray-100 text-[11px] font-medium text-gray-500 transition hover:bg-gray-200 hover:text-gray-700"
+                    sx={{ px: 1.5, py: 0.5 }}
+                  >
+                    Load older messages
+                  </Box>
+                </Stack>
+              )}
 
-            {messages.map((msg, i) => {
-              const absIdx = msg._absIndex ?? i;
-              const isSearchMatch = searchQuery && searchResults.some((r) => r.index === absIdx);
-              return (
-                <div key={absIdx} data-msg-index={absIdx} className={isSearchMatch ? "search-match-highlight rounded-2xl transition-colors duration-300" : ""}>
-                  <ChatMessage role={msg.role} content={msg.content} senderName={msg.senderName} vendorSlug={msg.vendorSlug ?? activeConv?.model?.vendor?.slug} modelName={msg.modelName ?? activeConv?.model?.name} isGroup={activeConv?.type === "group"} highlightText={searchQuery && isSearchMatch ? searchQuery : undefined} />
-                </div>
-              );
-            })}
+              {messages.map((msg, i) => {
+                const absIdx = msg._absIndex ?? i;
+                const isSearchMatch = searchQuery && searchResults.some((r) => r.index === absIdx);
+                return (
+                  <Box key={absIdx} data-msg-index={absIdx} className={isSearchMatch ? "search-match-highlight rounded-2xl transition-colors duration-300" : ""}>
+                    <ChatMessage role={msg.role} content={msg.content} senderName={msg.senderName} vendorSlug={msg.vendorSlug ?? activeConv?.model?.vendor?.slug} modelName={msg.modelName ?? activeConv?.model?.name} isGroup={activeConv?.type === "group"} highlightText={searchQuery && isSearchMatch ? searchQuery : undefined} />
+                  </Box>
+                );
+              })}
 
-            {(sending || agentIsTyping) && (
-              <div className="flex justify-start animate-fade-in">
-                <div className={`mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl shadow-sm ring-1 ${
-                  activeConv?.model?.vendor?.slug === "openai" ? "bg-emerald-50 text-emerald-700 ring-emerald-200/60" :
-                  activeConv?.model?.vendor?.slug === "anthropic" ? "bg-amber-50 text-amber-700 ring-amber-200/60" :
-                  activeConv?.model?.vendor?.slug === "google" ? "bg-blue-50 text-blue-700 ring-blue-200/60" :
-                  "bg-gray-100 text-gray-500 ring-gray-200/60"
-                }`}>
-                  <VendorIcon slug={activeConv?.model?.vendor?.slug ?? ""} />
-                </div>
-                <div className="rounded-2xl rounded-tl-md bg-white px-4 py-3 shadow-glass ring-1 ring-gray-950/[0.04]">
-                  <div className="flex gap-1.5">
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-300 [animation-delay:-0.3s]" />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-300 [animation-delay:-0.15s]" />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-gray-300" />
-                  </div>
-                </div>
-              </div>
-            )}
+              {(sending || agentIsTyping) && (
+                <Stack direction="row" className="animate-fade-in">
+                  <Box
+                    className={`mr-3 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl shadow-sm ring-1 ${
+                      activeConv?.model?.vendor?.slug === "openai" ? "bg-emerald-50 text-emerald-700 ring-emerald-200/60" :
+                      activeConv?.model?.vendor?.slug === "anthropic" ? "bg-amber-50 text-amber-700 ring-amber-200/60" :
+                      activeConv?.model?.vendor?.slug === "google" ? "bg-blue-50 text-blue-700 ring-blue-200/60" :
+                      "bg-gray-100 text-gray-500 ring-gray-200/60"
+                    }`}
+                  >
+                    <VendorIcon slug={activeConv?.model?.vendor?.slug ?? ""} />
+                  </Box>
+                  <Box className="rounded-2xl rounded-tl-md bg-white px-4 py-3 shadow-glass ring-1 ring-gray-950/[0.04]">
+                    <Stack direction="row" spacing={0.75}>
+                      <Box className="h-2 w-2 animate-bounce rounded-full bg-gray-300 [animation-delay:-0.3s]" />
+                      <Box className="h-2 w-2 animate-bounce rounded-full bg-gray-300 [animation-delay:-0.15s]" />
+                      <Box className="h-2 w-2 animate-bounce rounded-full bg-gray-300" />
+                    </Stack>
+                  </Box>
+                </Stack>
+              )}
 
-            <div ref={bottomRef} />
-          </div>
-        </div>
+              <Box ref={bottomRef} />
+            </Stack>
+          </Container>
+        </Box>
 
         {/* Input Bar */}
         <ChatInput
@@ -1065,95 +1135,132 @@ export default function ChatPage() {
           agentName={activeConv?.type === "group" ? (activeConv.agentDefinition ?? undefined) : undefined}
           vendorSlug={activeConv?.type === "group" ? (activeConv.model?.vendor?.slug ?? undefined) : undefined}
         />
-      </main>
+      </Stack>
 
       {/* New Chat Modal */}
       {showNewChat && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm animate-scale-in rounded-t-2xl sm:rounded-2xl border border-gray-200/60 bg-white/95 p-5 sm:p-6 shadow-glass-lg backdrop-blur-xl mx-0 sm:mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-base font-bold text-gray-900">New Chat</h3>
-                <p className="text-xs text-gray-500">
+        <Stack
+          alignItems={{ xs: "stretch", sm: "center" }}
+          justifyContent={{ xs: "flex-end", sm: "center" }}
+          className="animate-fade-in"
+          sx={{ position: "fixed", inset: 0, zIndex: 50, bgcolor: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}
+        >
+          <Box
+            className="animate-scale-in border border-gray-200/60 bg-white/95 shadow-glass-lg backdrop-blur-xl"
+            sx={{
+              width: "100%",
+              maxWidth: "24rem",
+              borderRadius: { xs: "1rem 1rem 0 0", sm: "1rem" },
+              p: { xs: 2.5, sm: 3 },
+              mx: { xs: 0, sm: 2 },
+            }}
+          >
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+              <Box>
+                <Box component="h3" className="text-base font-bold text-gray-900">New Chat</Box>
+                <Box component="p" className="text-xs text-gray-500">
                   Choose an agent to start a conversation with.
-                </p>
-              </div>
-              <button
+                </Box>
+              </Box>
+              <Box
+                component="button"
                 onClick={() => setShowNewChat(false)}
                 className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
               >
                 <X className="h-4 w-4" />
-              </button>
-            </div>
+              </Box>
+            </Stack>
 
             {!agentsLoaded ? (
-              <div className="flex items-center justify-center py-8">
+              <Stack alignItems="center" justifyContent="center" sx={{ py: 4 }}>
                 <Loader2 className="h-6 w-6 animate-spin text-gray-300" />
-              </div>
+              </Stack>
             ) : filteredAgents.length === 0 ? (
-              <p className="py-6 text-center text-sm text-gray-400">
+              <Box component="p" className="text-center text-sm text-gray-400" sx={{ py: 3 }}>
                 No available agents. Ask an admin to create one first.
-              </p>
+              </Box>
             ) : (
-              <div className="max-h-60 space-y-1 overflow-y-auto">
+              <Stack spacing={0.5} sx={{ maxHeight: 240, overflowY: "auto" }}>
                 {filteredAgents.map((a) => (
-                  <button
+                  <Stack
                     key={a.id}
+                    component="button"
+                    direction="row"
+                    alignItems="center"
+                    spacing={1.5}
                     onClick={() => handleCreateNewChat(a.id)}
                     disabled={creatingChat}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition-all duration-150 hover:bg-indigo-50/70 active:scale-[0.98] disabled:opacity-50"
+                    className="w-full rounded-xl text-left text-sm transition-all duration-150 hover:bg-indigo-50/70 active:scale-[0.98] disabled:opacity-50"
+                    sx={{ px: 1.5, py: 1.5, cursor: "pointer" }}
                   >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-sm">
+                    <Box className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-sm" sx={{ flexShrink: 0 }}>
                       <Sparkles className="h-4 w-4" />
-                    </div>
-                    <span className="font-medium text-gray-900">
+                    </Box>
+                    <Box component="span" className="font-medium text-gray-900">
                       {a.definition || `Agent ${a.id.slice(0, 8)}`}
-                    </span>
-                  </button>
+                    </Box>
+                  </Stack>
                 ))}
-              </div>
+              </Stack>
             )}
-          </div>
-        </div>
+          </Box>
+        </Stack>
       )}
 
       {/* Group Info Panel */}
       {showGroupInfo && activeConv?.type === "group" && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in"
+        <Stack
+          alignItems={{ xs: "stretch", sm: "center" }}
+          justifyContent={{ xs: "flex-end", sm: "center" }}
+          className="animate-fade-in"
           onClick={() => setShowGroupInfo(false)}
+          sx={{ position: "fixed", inset: 0, zIndex: 50, bgcolor: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}
         >
-          <div
-            className="w-full max-w-sm animate-scale-in rounded-t-2xl sm:rounded-2xl border border-gray-200/60 bg-white/95 p-5 sm:p-6 shadow-glass-lg backdrop-blur-xl mx-0 sm:mx-4"
-            onClick={(e) => e.stopPropagation()}
+          <Box
+            className="animate-scale-in border border-gray-200/60 bg-white/95 shadow-glass-lg backdrop-blur-xl"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            sx={{
+              width: "100%",
+              maxWidth: "24rem",
+              borderRadius: { xs: "1rem 1rem 0 0", sm: "1rem" },
+              p: { xs: 2.5, sm: 3 },
+              mx: { xs: 0, sm: 2 },
+            }}
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md">
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2.5 }}>
+              <Stack direction="row" alignItems="center" spacing={1.5}>
+                <Box className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md">
                   <Users className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-gray-900">{activeConv.name}</h3>
-                  <p className="text-[11px] text-gray-400">
+                </Box>
+                <Box>
+                  <Box component="h3" className="text-base font-bold text-gray-900">{activeConv.name}</Box>
+                  <Box component="p" className="text-[11px] text-gray-400">
                     {groupMembersList.length} member{groupMembersList.length !== 1 ? "s" : ""} + 1 agent
-                  </p>
-                </div>
-              </div>
-              <button
+                  </Box>
+                </Box>
+              </Stack>
+              <Box
+                component="button"
                 onClick={() => setShowGroupInfo(false)}
                 className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
               >
                 <X className="h-4 w-4" />
-              </button>
-            </div>
+              </Box>
+            </Stack>
 
             {/* Agent */}
             {activeConv.agentDefinition && (
-              <div className="mb-4">
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Agent</p>
-                <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-gray-50 to-indigo-50/50 p-3 ring-1 ring-gray-100">
-                  <div
+              <Box sx={{ mb: 2 }}>
+                <Box component="p" className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Agent</Box>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  spacing={1.5}
+                  className="rounded-xl bg-gradient-to-r from-gray-50 to-indigo-50/50 ring-1 ring-gray-100"
+                  sx={{ p: 1.5 }}
+                >
+                  <Box
                     className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl shadow-sm ring-1 ${
                       activeConv.model?.vendor?.slug === "openai" ? "bg-emerald-50 text-emerald-600 ring-emerald-200/60" :
                       activeConv.model?.vendor?.slug === "anthropic" ? "bg-amber-50 text-amber-600 ring-amber-200/60" :
@@ -1166,64 +1273,82 @@ export default function ChatPage() {
                     ) : (
                       <Bot className="h-4 w-4" />
                     )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{activeConv.agentDefinition}</p>
+                  </Box>
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Box component="p" className="text-sm font-semibold text-gray-900 truncate">{activeConv.agentDefinition}</Box>
                     {activeConv.model && (
-                      <p className="text-[11px] text-gray-400 truncate">{activeConv.model.vendor?.name} &middot; {activeConv.model.name}</p>
+                      <Box component="p" className="text-[11px] text-gray-400 truncate">{activeConv.model.vendor?.name} &middot; {activeConv.model.name}</Box>
                     )}
-                  </div>
-                </div>
-              </div>
+                  </Box>
+                </Stack>
+              </Box>
             )}
 
             {/* Members */}
-            <div>
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Members</p>
-              <div className="max-h-60 space-y-1 overflow-y-auto">
+            <Box>
+              <Box component="p" className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Members</Box>
+              <Stack spacing={0.5} sx={{ maxHeight: 240, overflowY: "auto" }}>
                 {groupMembersList.map((m) => {
                   const name = m.displayName || m.userId;
                   const isCurrentUser = m.userId === user?.id;
                   return (
-                    <div
+                    <Stack
                       key={m.userId}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-gray-50"
+                      direction="row"
+                      alignItems="center"
+                      spacing={1.5}
+                      className="rounded-xl transition-colors hover:bg-gray-50"
+                      sx={{ px: 1.5, py: 1.25 }}
                     >
-                      <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-sm ring-1 ring-gray-950/[0.04] ${
+                      <Box className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-sm ring-1 ring-gray-950/[0.04] ${
                         isCurrentUser
                           ? "bg-gradient-to-br from-indigo-100 to-blue-100 text-indigo-600"
                           : "bg-gradient-to-br from-gray-100 to-gray-200 text-gray-600"
                       }`}>
                         {name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-900 truncate">
+                      </Box>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Box component="p" className="text-sm font-medium text-gray-900 truncate">
                           {name}
                           {isCurrentUser && (
-                            <span className="ml-1.5 text-[10px] font-semibold text-indigo-500">you</span>
+                            <Box component="span" className="ml-1.5 text-[10px] font-semibold text-indigo-500">you</Box>
                           )}
-                        </p>
-                      </div>
-                    </div>
+                        </Box>
+                      </Box>
+                    </Stack>
                   );
                 })}
-              </div>
-            </div>
-          </div>
-        </div>
+              </Stack>
+            </Box>
+          </Box>
+        </Stack>
       )}
 
       {/* Delete Chat Confirmation */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm animate-scale-in rounded-t-2xl sm:rounded-2xl border border-gray-200/60 bg-white/95 p-5 sm:p-6 shadow-glass-lg backdrop-blur-xl mx-0 sm:mx-4">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100">
+        <Stack
+          alignItems={{ xs: "stretch", sm: "center" }}
+          justifyContent={{ xs: "flex-end", sm: "center" }}
+          className="animate-fade-in"
+          sx={{ position: "fixed", inset: 0, zIndex: 50, bgcolor: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}
+        >
+          <Box
+            className="animate-scale-in border border-gray-200/60 bg-white/95 shadow-glass-lg backdrop-blur-xl"
+            sx={{
+              width: "100%",
+              maxWidth: "24rem",
+              borderRadius: { xs: "1rem 1rem 0 0", sm: "1rem" },
+              p: { xs: 2.5, sm: 3 },
+              mx: { xs: 0, sm: 2 },
+            }}
+          >
+            <Box className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100">
               <AlertTriangle className="h-6 w-6 text-red-500" />
-            </div>
-            <h3 className="mb-1 text-base font-bold text-gray-900">
+            </Box>
+            <Box component="h3" className="mb-1 text-base font-bold text-gray-900">
               Delete "{deleteTarget.title}"?
-            </h3>
-            <p className="mb-5 text-sm text-gray-500 leading-relaxed">
+            </Box>
+            <Box component="p" className="mb-5 text-sm text-gray-500 leading-relaxed">
               This will permanently delete{" "}
               <strong className="text-gray-700">
                 all conversation history
@@ -1232,16 +1357,18 @@ export default function ChatPage() {
               <strong className="text-gray-700">agent memory</strong>, and{" "}
               <strong className="text-gray-700">episodic context</strong>{" "}
               associated with this chat. This action cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2.5">
-              <button
+            </Box>
+            <Stack direction="row" justifyContent="flex-end" spacing={1.25}>
+              <Box
+                component="button"
                 onClick={() => setDeleteTarget(null)}
                 disabled={deleting}
                 className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all duration-200 hover:bg-gray-50 active:scale-[0.98]"
               >
                 Cancel
-              </button>
-              <button
+              </Box>
+              <Box
+                component="button"
                 onClick={handleConfirmDelete}
                 disabled={deleting}
                 className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-red-700 active:scale-[0.98] disabled:opacity-50"
@@ -1251,11 +1378,11 @@ export default function ChatPage() {
                 ) : (
                   "Delete permanently"
                 )}
-              </button>
-            </div>
-          </div>
-        </div>
+              </Box>
+            </Stack>
+          </Box>
+        </Stack>
       )}
-    </div>
+    </Stack>
   );
 }

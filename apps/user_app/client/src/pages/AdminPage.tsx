@@ -41,6 +41,7 @@ function AgentCard({
   onSaved: () => void;
 }) {
   const isAttached = !!(agent.singleChatId || agent.groupId);
+  const isDefault = !!agent.isDefault;
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState(agent.definition ?? "");
   const [instructions, setInstructions] = useState(
@@ -125,13 +126,18 @@ function AgentCard({
         </div>
       ) : (
         <div
-          onClick={() => setEditing(true)}
-          className="cursor-pointer text-gray-700 hover:text-indigo-600 transition-colors duration-200"
-          title="Click to edit"
+          onClick={agent.editable ? () => setEditing(true) : undefined}
+          className={agent.editable ? "cursor-pointer text-gray-700 hover:text-indigo-600 transition-colors duration-200" : "text-gray-700 opacity-75"}
+          title={isDefault ? "Default user agent — editing disabled" : !agent.editable ? "You don't have permission to edit this agent" : "Click to edit"}
         >
           {agent.definition && (
             <p className="mb-1 text-sm font-semibold text-gray-900">
               {agent.definition}
+              {isDefault && (
+                <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-semibold text-amber-600 uppercase">
+                  default
+                </span>
+              )}
               {isAttached ? (
                 <span className="ml-2 rounded-full bg-indigo-50 px-2 py-0.5 text-[9px] font-semibold text-indigo-500 uppercase">
                   {agent.singleChatId ? "single chat" : "group"}
@@ -146,10 +152,12 @@ function AgentCard({
           <p className="line-clamp-3 text-xs text-gray-500 leading-relaxed">
             {agent.coreInstructions || "(no instructions)"}
           </p>
-          <p className="mt-2 flex items-center gap-1 text-[10px] font-medium text-indigo-500">
-            <Pencil className="h-2.5 w-2.5" />
-            Click to edit
-          </p>
+          {agent.editable && (
+            <p className="mt-2 flex items-center gap-1 text-[10px] font-medium text-indigo-500">
+              <Pencil className="h-2.5 w-2.5" />
+              Click to edit
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -159,14 +167,18 @@ function AgentCard({
 function UserCard({
   u,
   roles: availableRoles,
-  isSystemAdmin,
+  currentUserRole,
   onSaved,
 }: {
   u: AdminUser;
   roles: AdminRole[];
-  isSystemAdmin: boolean;
+  currentUserRole: string;
   onSaved: () => void;
 }) {
+  const isSuperAdmin = currentUserRole === "super_admin";
+  const targetIsSuperAdmin = u.role === "super_admin";
+  // Admins cannot edit super_admin users; super_admins can edit anyone
+  const canEdit = isSuperAdmin || !targetIsSuperAdmin;
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(u.displayName ?? "");
   const [selectedRoleId, setSelectedRoleId] = useState(u.roleId ?? "");
@@ -224,7 +236,7 @@ function UserCard({
                 className={inputClass}
               />
             </div>
-            {isSystemAdmin && (
+            {isSuperAdmin && (
               <div>
                 <label className="mb-1 block text-[10px] font-medium text-gray-500">
                   Access Level
@@ -319,6 +331,11 @@ function UserCard({
                 </p>
                 <p className="font-mono text-[10px] text-gray-400">{u.id}</p>
               </div>
+              {u.role === "super_admin" && (
+                <span className="ml-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">
+                  super admin
+                </span>
+              )}
               {u.role === "admin" && (
                 <span className="ml-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">
                   admin
@@ -340,12 +357,14 @@ function UserCard({
               </div>
             )}
           </div>
-          <button
-            onClick={() => setEditing(true)}
-            className="rounded-xl bg-gray-100 p-2 text-gray-500 transition hover:bg-gray-200 hover:text-gray-700"
-          >
-            <Pencil className="h-3 w-3" />
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => setEditing(true)}
+              className="rounded-xl bg-gray-100 p-2 text-gray-500 transition hover:bg-gray-200 hover:text-gray-700"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -388,7 +407,7 @@ export default function AdminPage() {
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
-    if (user && user.role !== "admin") navigate("/", { replace: true });
+    if (user && user.role !== "admin" && user.role !== "super_admin") navigate("/", { replace: true });
   }, [user, navigate]);
 
   const reload = useCallback(async () => {
@@ -607,7 +626,7 @@ export default function AdminPage() {
   const btnPrimary =
     "inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md hover:shadow-indigo-200/50 active:scale-[0.98] disabled:opacity-50 disabled:shadow-none";
 
-  if (!user || user.role !== "admin") return null;
+  if (!user || user.role !== "admin" && user.role !== "super_admin") return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
@@ -644,7 +663,7 @@ export default function AdminPage() {
         {error && (
           <div className="flex items-center gap-2.5 sm:gap-3 rounded-2xl bg-red-50 px-4 py-3 sm:px-5 sm:py-4 text-sm text-red-700 ring-1 ring-red-100 animate-slide-up">
             <AlertCircle className="h-5 w-5 flex-shrink-0 text-red-500" />
-            <span className="flex-1">{error}</span>
+            <span className="flex-1 min-w-0 break-words">{error}</span>
             <button
               onClick={() => setError("")}
               className="rounded-lg p-1 hover:bg-red-100 transition"
@@ -724,7 +743,7 @@ export default function AdminPage() {
             </h2>
             <div className="max-h-[500px] overflow-y-auto space-y-2.5">
               {users.map((u) => (
-                <UserCard key={u.id} u={u} roles={roles} isSystemAdmin={user?.id === "SYSTEM"} onSaved={reload} />
+                <UserCard key={u.id} u={u} roles={roles} currentUserRole={user?.role ?? "user"} onSaved={reload} />
               ))}
             </div>
           </div>

@@ -55,7 +55,7 @@ export interface Conversations {
 
 export interface LoginResponse {
   token: string;
-  user: { id: string; displayName: string | null; userIdentity: Record<string, unknown> | null; role: string };
+  user: { id: string; displayName: string | null; userIdentity: Record<string, unknown> | null; role: string; defaultAgentId: string | null };
   conversations: Conversations;
 }
 
@@ -89,6 +89,7 @@ export interface MeResponse {
   id: string;
   displayName: string | null;
   role: string;
+  defaultAgentId: string | null;
   conversations: Conversations;
 }
 
@@ -282,6 +283,8 @@ export interface AdminAgent {
   coreInstructions: string | null;
   singleChatId: string | null;
   groupId: string | null;
+  isDefault: boolean;
+  editable: boolean;
   createdAt: string;
 }
 

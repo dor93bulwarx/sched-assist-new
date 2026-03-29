@@ -21,7 +21,6 @@ export function signToken(payload: AuthPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "8h" });
 }
 
-/** Used by Socket.IO handshake (and anywhere else that has a raw bearer token). */
 export function verifyToken(token: string): AuthPayload | null {
   try {
     return jwt.verify(token, JWT_SECRET) as AuthPayload;

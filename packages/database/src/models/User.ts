@@ -13,6 +13,7 @@ type UserCreationAttributes = Optional<
   | "password"
   | "userName"
   | "roleId"
+  | "defaultAgentId"
 >;
 
 class User
@@ -26,6 +27,7 @@ class User
   declare userIdentity: UserIdentity | null;
   declare password: string | null;
   declare roleId: string | null;
+  declare defaultAgentId: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -68,6 +70,12 @@ User.init(
       allowNull: true,
       field: "role_id",
       references: { model: "roles", key: "id" },
+    },
+    defaultAgentId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: "default_agent_id",
+      references: { model: "agents", key: "id" },
     },
     createdAt: {
       type: DataTypes.DATE,

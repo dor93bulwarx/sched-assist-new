@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
 import { ChevronDown, Check, AlertTriangle, Loader2 } from "lucide-react";
 import type { ConversationModelInfo } from "../api";
 import { admin } from "../api";
@@ -72,36 +74,85 @@ export default function ModelSelector({
     "bg-gray-50 text-gray-600 border-gray-200";
 
   return (
-    <div ref={ref} className="relative">
-      <button
+    <Box ref={ref} sx={{ position: "relative", flexShrink: 0 }}>
+      <Stack
+        component="button"
+        direction="row"
+        alignItems="center"
         onClick={() => {
           setOpen(!open);
           setError(null);
         }}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-sm transition-all duration-200 hover:shadow-md active:scale-95 ${colors}`}
+        className={`rounded-full border font-semibold shadow-sm transition-all duration-200 hover:shadow-md active:scale-95 ${colors}`}
+        sx={{
+          gap: { xs: "4px", sm: "6px" },
+          px: { xs: "8px", sm: "12px" },
+          py: { xs: "4px", sm: "6px" },
+          fontSize: { xs: "10px", sm: "11px" },
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
         title="Change model"
       >
         <VendorIcon slug={vendorSlug} />
-        <span className="max-w-[7rem] truncate sm:max-w-none">{currentModel?.name ?? "Select model"}</span>
+        <Box
+          component="span"
+          sx={{
+            maxWidth: { xs: "5rem", sm: "none" },
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {currentModel?.name ?? "Select model"}
+        </Box>
         <ChevronDown
           className={`h-3 w-3 flex-shrink-0 opacity-50 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
-      </button>
+      </Stack>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-[calc(100vw-2rem)] sm:w-72 max-w-72 animate-scale-in rounded-2xl border border-gray-200/80 bg-white/95 shadow-glass-lg backdrop-blur-xl">
+        <Box
+          className="animate-scale-in rounded-2xl border border-gray-200/80 bg-white/95 shadow-glass-lg backdrop-blur-xl"
+          sx={{
+            position: "absolute",
+            right: 0,
+            top: "100%",
+            zIndex: 50,
+            mt: 1,
+            width: { xs: "calc(100vw - 2rem)", sm: "18rem" },
+            maxWidth: "18rem",
+          }}
+        >
           {error && (
-            <div className="flex items-start gap-2 border-b border-red-100 bg-red-50 px-3 py-2.5 rounded-t-2xl">
+            <Stack
+              direction="row"
+              alignItems="flex-start"
+              spacing={1}
+              className="border-b border-red-100 bg-red-50 rounded-t-2xl"
+              sx={{ px: 1.5, py: 1.25 }}
+            >
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-500" />
-              <p className="text-[11px] leading-tight text-red-700">{error}</p>
-            </div>
+              <Box
+                component="p"
+                sx={{
+                  fontSize: "11px",
+                  lineHeight: "tight",
+                  color: "rgb(185 28 28)",
+                  wordBreak: "break-word",
+                  minWidth: 0,
+                }}
+              >
+                {error}
+              </Box>
+            </Stack>
           )}
 
-          <div className="p-1.5 max-h-64 overflow-y-auto">
+          <Box sx={{ p: 0.75, maxHeight: 256, overflowY: "auto" }}>
             {loading && (
-              <div className="flex items-center justify-center py-6">
+              <Stack alignItems="center" justifyContent="center" sx={{ py: 3 }}>
                 <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
-              </div>
+              </Stack>
             )}
             {!loading &&
               models.map((m) => {
@@ -110,38 +161,45 @@ export default function ModelSelector({
                 const mVendor = m.vendor?.slug ?? "unknown";
                 const mColors = vendorColors[mVendor] ?? "";
                 return (
-                  <button
+                  <Stack
+                    component="button"
                     key={m.id}
+                    direction="row"
+                    alignItems="center"
+                    spacing={1.25}
                     onClick={() => selectModel(m)}
                     disabled={isSwitching || isSelected}
-                    className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs transition-all duration-150 ${
+                    className={`w-full rounded-xl text-left text-xs transition-all duration-150 ${
                       isSelected
                         ? "bg-indigo-50 ring-1 ring-indigo-100"
                         : "hover:bg-gray-50"
                     } disabled:opacity-60`}
+                    sx={{ px: 1.5, py: 1.25, cursor: "pointer" }}
                   >
-                    <span
+                    <Box
+                      component="span"
                       className={`flex h-7 w-7 items-center justify-center rounded-lg border ${mColors || "border-gray-200 bg-gray-50 text-gray-500"}`}
+                      sx={{ flexShrink: 0 }}
                     >
                       <VendorIcon slug={mVendor} />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900">{m.name}</p>
-                      <p className="text-[10px] text-gray-400">
+                    </Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box component="p" className="font-medium text-gray-900" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</Box>
+                      <Box component="p" sx={{ fontSize: "10px" }} className="text-gray-400">
                         {m.vendor?.name}
-                      </p>
-                    </div>
+                      </Box>
+                    </Box>
                     {isSwitching ? (
                       <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
                     ) : isSelected ? (
                       <Check className="h-4 w-4 text-indigo-600" />
                     ) : null}
-                  </button>
+                  </Stack>
                 );
               })}
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 }
