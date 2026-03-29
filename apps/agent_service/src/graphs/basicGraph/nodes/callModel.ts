@@ -144,7 +144,7 @@ export async function callModelNode(
   state: AgentState,
   config: RunnableConfig,
 ): Promise<Partial<AgentState>> {
-  const { systemPrompt, messages: stateMessages, singleChatId, groupId } = state;
+  const { systemPrompt, messages: stateMessages, singleChatId, groupId, threadId, userId } = state;
 
   const modelSlug = await resolveModelSlug(singleChatId, groupId);
 
@@ -232,13 +232,39 @@ export async function callModelNode(
         const t = tc.name ? toolByName.get(tc.name) : undefined;
         let content: string;
         if (!t) {
+          logger.warn("Unknown tool requested by model", {
+            threadId,
+            userId,
+            toolName: tc.name ?? null,
+            toolCallId: tc.id,
+          });
           content = `Error: unknown tool "${tc.name ?? ""}".`;
         } else {
           try {
             content = String(
               await t.invoke((tc.args ?? {}) as { action: "append" | "rewrite"; content: string }),
             );
+            const raw = tc.args as Record<string, unknown> | undefined;
+            const text = typeof raw?.content === "string" ? raw.content : "";
+            logger.info("Tool call completed", {
+              threadId,
+              userId,
+              tool: tc.name,
+              toolCallId: tc.id,
+              round,
+              action: typeof raw?.action === "string" ? raw.action : undefined,
+              contentLength: text.length,
+              resultPreview:
+                content.length > 300 ? `${content.slice(0, 300)}…` : content,
+            });
           } catch (toolErr) {
+            logger.error("Tool invocation failed", {
+              threadId,
+              userId,
+              tool: tc.name,
+              toolCallId: tc.id,
+              error: rawVendorErrorText(toolErr),
+            });
             content = `Error executing tool: ${rawVendorErrorText(toolErr)}`;
           }
         }
