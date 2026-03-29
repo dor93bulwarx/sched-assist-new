@@ -23,7 +23,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    }, 15000);
   }, []);
 
   const dismiss = useCallback((id: number) => {

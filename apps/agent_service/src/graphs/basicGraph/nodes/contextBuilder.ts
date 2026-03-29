@@ -214,7 +214,7 @@ function formatSystemPrompt(
 
   const coreMemTrim = coreMemory.trim();
   if (coreMemTrim.length > 0) {
-    sections.push("## Core memory (long-term preferences & facts)");
+    sections.push("## Core memory (long-term preferences & facts about the user)");
     sections.push(coreMemory);
     sections.push("");
   }

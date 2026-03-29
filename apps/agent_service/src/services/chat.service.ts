@@ -1,6 +1,5 @@
 import { getAgentChatQueue } from "../deps";
 import type { AgentChatJobData } from "../queues/agentChat.bull";
-import { logger } from "../logger";
 
 export class ChatService {
   async enqueueChat(data: {
