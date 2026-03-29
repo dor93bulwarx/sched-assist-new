@@ -6,6 +6,8 @@ WORKDIR /app
 COPY package.json tsconfig.base.json ./
 COPY packages/ ./packages/
 COPY apps/agent_service/ ./apps/agent_service/
+# Migration 20240101000013 reads ../../../apps/coreInstructions.json → /app/apps/coreInstructions.json
+COPY apps/coreInstructions.json ./apps/coreInstructions.json
 
 RUN npm install --no-package-lock
 RUN npm run build --workspace=@scheduling-agent/types

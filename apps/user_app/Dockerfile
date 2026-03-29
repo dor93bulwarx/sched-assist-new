@@ -5,6 +5,8 @@ WORKDIR /app
 COPY package.json tsconfig.base.json ./
 COPY packages/ ./packages/
 COPY apps/user_app/ ./apps/user_app/
+# auth.service reads ../../../coreInstructions.json from dist → /app/apps/coreInstructions.json
+COPY apps/coreInstructions.json ./apps/coreInstructions.json
 
 RUN npm install --no-package-lock
 
@@ -24,6 +26,7 @@ COPY --from=builder /app/packages/ ./packages/
 COPY --from=builder /app/apps/user_app/dist/ ./apps/user_app/dist/
 COPY --from=builder /app/apps/user_app/package.json ./apps/user_app/
 COPY --from=builder /app/apps/user_app/client/dist/ ./apps/user_app/client/dist/
+COPY --from=builder /app/apps/coreInstructions.json ./apps/coreInstructions.json
 
 ENV NODE_ENV=production
 
