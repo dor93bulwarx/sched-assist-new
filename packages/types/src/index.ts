@@ -70,6 +70,7 @@ export interface SingleChatAttributes {
   userId: UserId;
   agentId: AgentId;
   modelId: ModelId | null;
+  activeThreadId: string | null;
   title: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -80,6 +81,7 @@ export interface GroupAttributes {
   name: string;
   agentId: AgentId;
   modelId: ModelId | null;
+  activeThreadId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -217,6 +219,23 @@ export interface MessageNotificationAttributes {
   conversationType: "group" | "single";
   deliveredAt: Date;
   seenAt: Date | null;
+}
+
+// ─── Conversation Messages ──────────────────────────────────────────────────
+
+export interface ConversationMessageAttributes {
+  id: string;
+  groupId: GroupId | null;
+  singleChatId: SingleChatId | null;
+  threadId: string;
+  role: "user" | "assistant";
+  content: string;
+  senderName: string | null;
+  requestId: string | null;
+  modelSlug: string | null;
+  vendorSlug: string | null;
+  modelName: string | null;
+  createdAt: Date;
 }
 
 // ─── Session Summarization ───────────────────────────────────────────────────

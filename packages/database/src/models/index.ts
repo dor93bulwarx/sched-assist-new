@@ -9,3 +9,4 @@ export { SingleChat } from "./SingleChat";
 export { Thread } from "./Thread";
 export { EpisodicMemory, EMBEDDING_DIMENSION } from "./EpisodicMemory";
 export { MessageNotification } from "./MessageNotification";
+export { ConversationMessage } from "./ConversationMessage";

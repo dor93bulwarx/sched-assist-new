@@ -58,6 +58,21 @@ export class SessionsController {
     }
   };
 
+  getConversationHistory = async (req: Request, res: Response) => {
+    try {
+      const data = await this.sessionsService.getConversationHistory(
+        req.params.conversationType as string,
+        req.params.conversationId as string,
+        req.query.limit as string | undefined,
+        req.query.offset as string | undefined,
+      );
+      return res.json(data);
+    } catch (err: any) {
+      logger.error("Conversation history proxy error", { error: err?.message });
+      return res.status(502).json({ error: "Agent service unavailable." });
+    }
+  };
+
   getAvailableAgents = async (_req: Request, res: Response) => {
     try {
       const agents = await this.sessionsService.getAvailableAgents();

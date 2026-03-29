@@ -1,3 +1,4 @@
+import { ConversationMessage } from "@scheduling-agent/database";
 import { getGraph } from "../deps";
 
 export class HistoryService {
@@ -54,6 +55,45 @@ export class HistoryService {
     return { results, total };
   }
 
+  /**
+   * Conversation-scoped history — reads from `conversation_messages` table,
+   * not from LangGraph checkpoints.  Survives thread rotation.
+   */
+  async getConversationHistory(
+    conversationId: string,
+    conversationType: "group" | "single",
+    query: { limit?: number; offset?: number },
+  ) {
+    const where =
+      conversationType === "group"
+        ? { groupId: conversationId }
+        : { singleChatId: conversationId };
+
+    const total = await ConversationMessage.count({ where });
+
+    const limit = query.limit ?? total;
+    const offset = query.offset ?? Math.max(0, total - limit);
+
+    const rows = await ConversationMessage.findAll({
+      where,
+      order: [["created_at", "ASC"]],
+      offset,
+      limit,
+    });
+
+    const messages = rows.map((r) => ({
+      role: r.role as "user" | "assistant",
+      content: r.content,
+      ...(r.senderName ? { senderName: r.senderName } : {}),
+      ...(r.modelSlug ? { modelSlug: r.modelSlug } : {}),
+      ...(r.vendorSlug ? { vendorSlug: r.vendorSlug } : {}),
+      ...(r.modelName ? { modelName: r.modelName } : {}),
+    }));
+
+    return { messages, total };
+  }
+
+  /** Thread-scoped history — kept for debugging / legacy. */
   async getHistory(threadId: string, query: { limit?: number; offset?: number }) {
     const msgs = await this.loadRawMessages(threadId);
     const total = msgs.length;

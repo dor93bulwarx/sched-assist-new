@@ -22,7 +22,7 @@ import {
   createSession,
   sendMessage,
   getUnreadCounts,
-  getHistory,
+  getConversationHistory,
   searchHistory,
   getAgentsList,
   createSingleChat,
@@ -176,7 +176,10 @@ export default function ChatPage() {
         setActiveSession(session);
 
         try {
-          const { messages: history, total } = await getHistory(session.threadId, { limit: PAGE_SIZE });
+          const convType = activeConv.type === "group" ? "group" as const : "single" as const;
+          const { messages: history, total } = await getConversationHistory(
+            activeConv.id, convType, { limit: PAGE_SIZE },
+          );
           if (!cancelled) {
             setTotalMessages(total);
             const offset = Math.max(0, total - history.length);
@@ -218,7 +221,7 @@ export default function ChatPage() {
   }, [messages, loadingMore]);
 
   const handleLoadMore = useCallback(async () => {
-    if (!activeSession || loadingMore || loadedFrom <= 0) return;
+    if (!activeConv || loadingMore || loadedFrom <= 0) return;
     setLoadingMore(true);
 
     const container = scrollContainerRef.current;
@@ -227,7 +230,8 @@ export default function ChatPage() {
     try {
       const offset = Math.max(0, loadedFrom - PAGE_SIZE);
       const limit = loadedFrom - offset;
-      const { messages: older } = await getHistory(activeSession.threadId, { limit, offset });
+      const convType = activeConv.type === "group" ? "group" as const : "single" as const;
+      const { messages: older } = await getConversationHistory(activeConv.id, convType, { limit, offset });
 
       if (older.length > 0) {
         const olderMessages = older.map((h, i) => toMessage(h, offset + i));
@@ -246,7 +250,7 @@ export default function ChatPage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [activeSession, loadingMore, loadedFrom, toMessage]);
+  }, [activeConv, loadingMore, loadedFrom, toMessage]);
 
   useEffect(() => {
     const sentinel = topSentinelRef.current;
@@ -292,7 +296,7 @@ export default function ChatPage() {
   }, [activeSession]);
 
   const navigateToResult = useCallback(async (result: SearchResult) => {
-    if (!activeSession) return;
+    if (!activeConv) return;
 
     const isLoaded = result.index >= loadedFrom && result.index < loadedFrom + messages.length;
 
@@ -300,7 +304,8 @@ export default function ChatPage() {
       const targetOffset = Math.max(0, result.index - Math.floor(PAGE_SIZE / 2));
       setLoadingMore(true);
       try {
-        const { messages: page, total } = await getHistory(activeSession.threadId, {
+        const convType = activeConv.type === "group" ? "group" as const : "single" as const;
+        const { messages: page, total } = await getConversationHistory(activeConv.id, convType, {
           limit: Math.max(PAGE_SIZE, loadedFrom + messages.length - targetOffset),
           offset: targetOffset,
         });
@@ -322,7 +327,7 @@ export default function ChatPage() {
         setTimeout(() => el.classList.remove("search-highlight-flash"), 1500);
       }
     });
-  }, [activeSession, loadedFrom, messages.length, toMessage]);
+  }, [activeConv, loadedFrom, messages.length, toMessage]);
   navigateRef.current = navigateToResult;
 
   const handleSearchNav = useCallback((direction: "prev" | "next") => {

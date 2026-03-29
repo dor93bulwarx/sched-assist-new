@@ -4,7 +4,7 @@ import type { SingleChatAttributes } from "@scheduling-agent/types";
 
 type SingleChatCreationAttributes = Optional<
   SingleChatAttributes,
-  "id" | "createdAt" | "updatedAt" | "title" | "modelId"
+  "id" | "createdAt" | "updatedAt" | "title" | "modelId" | "activeThreadId"
 >;
 
 class SingleChat
@@ -15,6 +15,7 @@ class SingleChat
   declare userId: string;
   declare agentId: string;
   declare modelId: string | null;
+  declare activeThreadId: string | null;
   declare title: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -44,6 +45,12 @@ SingleChat.init(
       allowNull: true,
       field: "model_id",
       references: { model: "models", key: "id" },
+    },
+    activeThreadId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "active_thread_id",
+      references: { model: "threads", key: "id" },
     },
     title: {
       type: DataTypes.STRING,

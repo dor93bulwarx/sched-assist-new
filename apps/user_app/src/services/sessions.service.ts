@@ -49,6 +49,17 @@ export class SessionsService {
     return response.json();
   }
 
+  async getConversationHistory(conversationType: string, conversationId: string, limit?: string, offset?: string) {
+    const params = new URLSearchParams();
+    if (limit) params.set("limit", limit);
+    if (offset) params.set("offset", offset);
+    const qs = params.toString();
+    const response = await fetch(
+      `${AGENT_SERVICE_URL}/api/history/conversation/${conversationType}/${conversationId}${qs ? `?${qs}` : ""}`,
+    );
+    return response.json();
+  }
+
   async getAvailableAgents() {
     return Agent.findAll({
       where: { singleChatId: null, groupId: null },

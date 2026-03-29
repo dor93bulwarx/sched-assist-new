@@ -48,6 +48,13 @@ export class SessionsService {
       agentId,
     });
 
+    // Point the conversation at this thread so the worker resolves it as canonical.
+    if (data.groupId) {
+      await Group.update({ activeThreadId: threadId }, { where: { id: data.groupId } });
+    } else if (data.singleChatId) {
+      await SingleChat.update({ activeThreadId: threadId }, { where: { id: data.singleChatId } });
+    }
+
     if (data.title) {
       await session.update({ title: data.title });
     }

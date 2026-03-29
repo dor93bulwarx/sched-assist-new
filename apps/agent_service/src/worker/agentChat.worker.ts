@@ -10,6 +10,8 @@ import { getRedisConfig } from "../redisClient";
 import { executeChatTurn, storeMessageOnly } from "../chat/executeChatTurn";
 import { createThreadLockRedis, withThreadLock } from "./threadLock";
 import { emitAgentReply, emitAgentTyping } from "../socket";
+import { resolveCanonicalThreadId } from "../memory/canonicalThread";
+import { writeConversationMessage } from "../memory/conversationMessageWriter";
 import { logger } from "../logger";
 
 const redisConfig = getRedisConfig();
@@ -32,17 +34,36 @@ export function startAgentChatWorker(
   const worker = new Worker<AgentChatJobData, AgentChatJobResult, string>(
     AGENT_CHAT_QUEUE_NAME,
     async (job) => {
-      const { userId, threadId, message, groupId, singleChatId, agentId, requestId, mentionsAgent, displayName } =
+      const { userId, threadId: clientThreadId, message, groupId, singleChatId, agentId, requestId, mentionsAgent, displayName } =
         job.data;
 
-      logger.info("Processing chat job", { requestId, userId, threadId, groupId, singleChatId, mentionsAgent });
+      // Resolve the canonical thread for this conversation (handles stale client IDs after rotation).
+      const threadId = await resolveCanonicalThreadId(clientThreadId, groupId ?? null, singleChatId ?? null);
+
+      // Conversation-scoped lock key — ensures serialization even when threadId rotates.
+      const lockKey = groupId
+        ? `conv:group:${groupId}`
+        : singleChatId
+          ? `conv:single:${singleChatId}`
+          : threadId;
+
+      logger.info("Processing chat job", { requestId, userId, threadId, clientThreadId, groupId, singleChatId, mentionsAgent });
 
       // Group message without @mention → store only, no agent invocation
       if (groupId && mentionsAgent === false) {
         try {
-          await withThreadLock(lockRedis, threadId, () =>
-            storeMessageOnly(graph, { userId, threadId, message, groupId, singleChatId, agentId, displayName }),
-          );
+          await withThreadLock(lockRedis, lockKey, async () => {
+            await storeMessageOnly(graph, { userId, threadId, message, groupId, singleChatId, agentId, displayName });
+            await writeConversationMessage({
+              groupId: groupId ?? null,
+              singleChatId: singleChatId ?? null,
+              threadId,
+              role: "user",
+              content: message,
+              senderName: displayName,
+              requestId,
+            });
+          });
           return { threadId, reply: "", systemPrompt: null };
         } catch (err: any) {
           logger.error("Store-only failed", { requestId, threadId, error: err?.message });
@@ -58,8 +79,19 @@ export function startAgentChatWorker(
       });
 
       try {
-        const result = await withThreadLock(lockRedis, threadId, () =>
-          executeChatTurn(graph, {
+        const result = await withThreadLock(lockRedis, lockKey, async () => {
+          // Write the user message to the conversation transcript.
+          await writeConversationMessage({
+            groupId: groupId ?? null,
+            singleChatId: singleChatId ?? null,
+            threadId,
+            role: "user",
+            content: message,
+            senderName: displayName,
+            requestId,
+          });
+
+          const turnResult = await executeChatTurn(graph, {
             userId,
             threadId,
             message,
@@ -67,8 +99,25 @@ export function startAgentChatWorker(
             singleChatId,
             agentId,
             displayName,
-          }),
-        );
+          });
+
+          // Write the assistant reply to the conversation transcript.
+          if (turnResult.reply) {
+            await writeConversationMessage({
+              groupId: groupId ?? null,
+              singleChatId: singleChatId ?? null,
+              threadId,
+              role: "assistant",
+              content: turnResult.reply,
+              requestId,
+              modelSlug: turnResult.modelSlug,
+              vendorSlug: turnResult.vendorSlug,
+              modelName: turnResult.modelName,
+            });
+          }
+
+          return turnResult;
+        });
 
         logger.info("Chat turn completed", { requestId, threadId, replyLen: result.reply.length });
 

@@ -136,6 +136,21 @@ export function getHistory(
   return request<PaginatedHistory>(`/sessions/history/${threadId}${qs ? `?${qs}` : ""}`);
 }
 
+/** Conversation-scoped history — survives thread rotation. */
+export function getConversationHistory(
+  conversationId: string,
+  conversationType: "group" | "single",
+  opts?: { limit?: number; offset?: number },
+) {
+  const params = new URLSearchParams();
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  return request<PaginatedHistory>(
+    `/sessions/history/conversation/${conversationType}/${conversationId}${qs ? `?${qs}` : ""}`,
+  );
+}
+
 export interface SearchResult extends HistoryMessage {
   index: number;
 }

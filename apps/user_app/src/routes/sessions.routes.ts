@@ -7,6 +7,7 @@ const sessionsController = new SessionsController();
 
 router.get("/", authMiddleware, sessionsController.getSessions);
 router.post("/", authMiddleware, sessionsController.createSession);
+router.get("/history/conversation/:conversationType/:conversationId", authMiddleware, sessionsController.getConversationHistory);
 router.get("/history/:threadId/search", authMiddleware, sessionsController.searchHistory);
 router.get("/history/:threadId", authMiddleware, sessionsController.getHistory);
 router.get("/agents", authMiddleware, sessionsController.getAvailableAgents);

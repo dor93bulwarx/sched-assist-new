@@ -4,7 +4,7 @@ import type { GroupAttributes } from "@scheduling-agent/types";
 
 type GroupCreationAttributes = Optional<
   GroupAttributes,
-  "id" | "createdAt" | "updatedAt" | "modelId"
+  "id" | "createdAt" | "updatedAt" | "modelId" | "activeThreadId"
 >;
 
 class Group
@@ -15,6 +15,7 @@ class Group
   declare name: string;
   declare agentId: string;
   declare modelId: string | null;
+  declare activeThreadId: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -41,6 +42,12 @@ Group.init(
       allowNull: true,
       field: "model_id",
       references: { model: "models", key: "id" },
+    },
+    activeThreadId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "active_thread_id",
+      references: { model: "threads", key: "id" },
     },
     createdAt: {
       type: DataTypes.DATE,

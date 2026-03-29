@@ -1,7 +1,9 @@
 import type { CompiledStateGraph } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { HumanMessage } from "@langchain/core/messages";
+import { Thread } from "@scheduling-agent/database";
 import { ensureSession } from "../memory/sessionRegistry";
+import { rotateThread } from "../memory/threadRotation";
 import { getLangfuseCallbackHandler, observeWithContext } from "../langfuse";
 import { logger } from "../logger";
 import { resolveModelSlug } from "./modelResolution";
@@ -62,6 +64,10 @@ export async function executeChatTurn(
         agentId: agentId ?? null,
       });
 
+      // Snapshot summarizedAt before invoke so we can detect rotation trigger.
+      const threadBefore = await Thread.findByPk(threadId, { attributes: ["summarizedAt"] });
+      const preSummarizedAt = threadBefore?.summarizedAt?.getTime() ?? 0;
+
       const handler = getLangfuseCallbackHandler(userId, {
         threadId,
         service: "agent_service",
@@ -109,6 +115,21 @@ export async function executeChatTurn(
         );
 
       logger.debug("Graph invoke done", { threadId, messageCount: messages.length, hasAiReply: !!lastAiMessage });
+
+      // Detect summarization and rotate thread for next turn.
+      // The current reply was already produced on this thread — rotation
+      // only affects subsequent invocations.
+      try {
+        const threadAfter = await Thread.findByPk(threadId, { attributes: ["summarizedAt"] });
+        const postSummarizedAt = threadAfter?.summarizedAt?.getTime() ?? 0;
+        if (postSummarizedAt > preSummarizedAt) {
+          logger.info("Summarization detected, rotating thread", { threadId, groupId, singleChatId });
+          await rotateThread(groupId, singleChatId, agentId);
+        }
+      } catch (rotateErr: any) {
+        // Rotation failure is non-fatal — the current thread stays active.
+        logger.error("Thread rotation failed", { threadId, error: rotateErr?.message });
+      }
 
       const reply =
         lastAiMessage?.content ??

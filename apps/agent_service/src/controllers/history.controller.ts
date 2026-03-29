@@ -29,4 +29,23 @@ export class HistoryController {
       return res.json({ messages: [], total: 0 });
     }
   };
+
+  getConversationHistory = async (req: Request, res: Response) => {
+    const conversationType = req.params.conversationType as string;
+    const conversationId = req.params.conversationId as string;
+    if (conversationType !== "group" && conversationType !== "single") {
+      return res.status(400).json({ error: "conversationType must be 'group' or 'single'" });
+    }
+    try {
+      const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+      const offset = req.query.offset != null ? Number(req.query.offset) : undefined;
+      const result = await historyService.getConversationHistory(
+        conversationId, conversationType, { limit, offset },
+      );
+      return res.json(result);
+    } catch (err: any) {
+      logger.error("/api/history/conversation error", { conversationType, conversationId, error: err.message });
+      return res.json({ messages: [], total: 0 });
+    }
+  };
 }
