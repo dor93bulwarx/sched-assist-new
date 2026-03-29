@@ -6,6 +6,7 @@ import {
   HumanMessage,
   AIMessage,
   ToolMessage,
+  isAIMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
 
@@ -31,11 +32,53 @@ const MAX_TOOL_ROUNDS = 8;
 async function resolveVendor(modelSlug: string): Promise<{ slug: string; apiKey: string | null; modelName: string } | null> {
   const model = await LLMModel.findOne({
     where: { slug: modelSlug },
-    include: [{ model: Vendor, attributes: ["slug", "apiKey"] }],
+    attributes: ["id", "name", "vendorId"],
   });
-  const vendor = (model as any)?.Vendor;
+  if (!model) return null;
+  const vendor = await Vendor.findByPk(model.vendorId, { attributes: ["slug", "apiKey"] });
   if (!vendor) return null;
-  return { slug: vendor.slug, apiKey: vendor.apiKey ?? null, modelName: model!.name };
+  return { slug: vendor.slug, apiKey: vendor.apiKey ?? null, modelName: model.name };
+}
+
+/**
+ * OpenAI Chat Completions only allow specific `content` part types (`text`, `image_url`, …).
+ * After tool calls, LangChain / checkpoints may store `content` as an array that still
+ * includes `{ type: "functionCall", … }` blocks; OpenAI rejects those (they belong on `tool_calls`).
+ */
+function normalizeAssistantContentForOpenAI(content: unknown): string {
+  if (content == null) return "";
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const out: string[] = [];
+  for (const part of content) {
+    if (typeof part === "string") {
+      out.push(part);
+      continue;
+    }
+    if (!part || typeof part !== "object") continue;
+    const p = part as Record<string, unknown>;
+    const typ = p.type;
+    if (typ === "functionCall" || typ === "function_call") continue;
+    if (typ === "text" && typeof p.text === "string") out.push(p.text);
+    if (typ === "refusal" && typeof p.refusal === "string") out.push(p.refusal);
+  }
+  return out.join("\n");
+}
+
+/** Strips unsupported content parts from AI messages before sending to OpenAI. */
+function normalizeHistoryForOpenAI(msgs: BaseMessage[]): BaseMessage[] {
+  return msgs.map((msg) => {
+    if (!isAIMessage(msg)) return msg;
+    const nextContent = normalizeAssistantContentForOpenAI(msg.content);
+    if (nextContent === msg.content) return msg;
+    return new AIMessage({
+      content: nextContent,
+      tool_calls: msg.tool_calls,
+      id: msg.id,
+      name: msg.name,
+      additional_kwargs: msg.additional_kwargs,
+    });
+  });
 }
 
 /**
@@ -199,13 +242,28 @@ export async function callModelNode(
       if (m.role === "human" || m.role === "user") {
         llmMessages.push(new HumanMessage({ content: m.content, ...(m.name ? { name: sanitizeName(m.name) } : {}) }));
       } else if (m.role === "assistant" || m.role === "ai") {
-        llmMessages.push(new AIMessage(m.content));
+        llmMessages.push(
+          new AIMessage({
+            content: normalizeAssistantContentForOpenAI(m.content),
+            ...(Array.isArray(m.tool_calls) && m.tool_calls.length > 0 ? { tool_calls: m.tool_calls } : {}),
+          }),
+        );
+      } else if (m.role === "tool") {
+        llmMessages.push(
+          new ToolMessage({
+            content: typeof m.content === "string" ? m.content : String(m.content ?? ""),
+            tool_call_id: typeof m.tool_call_id === "string" ? m.tool_call_id : "",
+          }),
+        );
       }
     }
   }
 
+  const llmMessagesForProvider =
+    vendor.slug === "openai" ? normalizeHistoryForOpenAI(llmMessages) : llmMessages;
+
   try {
-    let working: BaseMessage[] = llmMessages;
+    let working: BaseMessage[] = llmMessagesForProvider;
     const newMessages: BaseMessage[] = [];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
