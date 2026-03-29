@@ -1,5 +1,5 @@
 import { Thread } from "@scheduling-agent/database";
-import type { SchedulerAgentState } from "../../../state";
+import type { AgentState } from "../../../state";
 import { logger } from "../../../logger";
 
 /**
@@ -27,8 +27,8 @@ const MAX_CHECKPOINT_BYTES = parseInt(
  * the sessionSummarization node before context assembly.
  */
 export async function summarizationGuardNode(
-  state: SchedulerAgentState,
-): Promise<Partial<SchedulerAgentState>> {
+  state: AgentState,
+): Promise<Partial<AgentState>> {
   // NOTE: always clear `error` so a stale failure from a previous checkpoint
   // does not short-circuit the entire turn. Fresh errors set by downstream
   // nodes (sessionSummarization, callModel) still propagate normally.

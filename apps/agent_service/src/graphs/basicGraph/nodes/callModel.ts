@@ -5,6 +5,7 @@ import {
   SystemMessage,
   HumanMessage,
   AIMessage,
+  ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
 
@@ -14,10 +15,15 @@ function sanitizeName(raw: string): string {
 }
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import { LLMModel, Vendor } from "@scheduling-agent/database";
 import { resolveModelSlug } from "../../../chat/modelResolution";
-import { SchedulerAgentState } from "../../../state";
+import { AgentState } from "../../../state";
 import { logger } from "../../../logger";
+import { createEditCoreMemoryTool } from "../../../tools/editCoreMemoryTool";
+
+/** Max model↔tool round-trips per graph step (prevents runaway loops). */
+const MAX_TOOL_ROUNDS = 8;
 
 /**
  * Resolves the vendor slug and API key for a given model slug by querying the DB.
@@ -135,9 +141,9 @@ function rawVendorErrorText(err: unknown): string {
  * Validates the API key first; on LLM errors, returns the provider's raw error text.
  */
 export async function callModelNode(
-  state: SchedulerAgentState,
+  state: AgentState,
   config: RunnableConfig,
-): Promise<Partial<SchedulerAgentState>> {
+): Promise<Partial<AgentState>> {
   const { systemPrompt, messages: stateMessages, singleChatId, groupId } = state;
 
   const modelSlug = await resolveModelSlug(singleChatId, groupId);
@@ -160,6 +166,24 @@ export async function callModelNode(
   logger.info("Calling LLM", { modelSlug, vendorSlug: vendor.slug, messageCount: stateMessages.length });
 
   const model = getModel(modelSlug, vendor.slug, vendor.apiKey);
+  const tools = [createEditCoreMemoryTool(state.userId)];
+  const toolByName = new Map<string, StructuredToolInterface>(
+    tools.map((t) => [t.name, t]),
+  );
+
+  const bindTools = (model as BaseChatModel & { bindTools?: (t: unknown[]) => BaseChatModel })
+    .bindTools;
+  if (typeof bindTools !== "function") {
+    logger.error("Chat model does not support bindTools; core memory tool unavailable", {
+      modelSlug,
+    });
+    return {
+      error:
+        "This chat model does not support tool calling. Choose another model or update the integration.",
+    };
+  }
+  const modelWithTools = bindTools.call(model, tools);
+
   const llmMessages: BaseMessage[] = [new SystemMessage(systemPrompt)];
 
   for (const msg of stateMessages) {
@@ -181,15 +205,59 @@ export async function callModelNode(
   }
 
   try {
-    const response = await model.invoke(llmMessages, config);
-    // Attach model metadata so it's persisted in the checkpoint and available in history
-    (response as any).additional_kwargs = {
-      ...(response as any).additional_kwargs,
-      modelSlug,
-      vendorSlug: vendor.slug,
-      modelName: vendor.modelName,
+    let working: BaseMessage[] = llmMessages;
+    const newMessages: BaseMessage[] = [];
+
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const response = await modelWithTools.invoke(working, config);
+
+      const toolCalls =
+        response instanceof AIMessage ? response.tool_calls : undefined;
+
+      if (!toolCalls?.length) {
+        (response as AIMessage).additional_kwargs = {
+          ...(response as AIMessage).additional_kwargs,
+          modelSlug,
+          vendorSlug: vendor.slug,
+          modelName: vendor.modelName,
+        };
+        newMessages.push(response);
+        return { messages: newMessages };
+      }
+
+      newMessages.push(response);
+
+      const toolMsgs: ToolMessage[] = [];
+      for (const tc of toolCalls) {
+        const t = tc.name ? toolByName.get(tc.name) : undefined;
+        let content: string;
+        if (!t) {
+          content = `Error: unknown tool "${tc.name ?? ""}".`;
+        } else {
+          try {
+            content = String(
+              await t.invoke((tc.args ?? {}) as { action: "append" | "rewrite"; content: string }),
+            );
+          } catch (toolErr) {
+            content = `Error executing tool: ${rawVendorErrorText(toolErr)}`;
+          }
+        }
+        toolMsgs.push(
+          new ToolMessage({
+            content,
+            tool_call_id: tc.id ?? "",
+          }),
+        );
+      }
+
+      newMessages.push(...toolMsgs);
+      working = [...working, response, ...toolMsgs];
+    }
+
+    logger.warn("Tool loop stopped after max rounds", { maxRounds: MAX_TOOL_ROUNDS });
+    return {
+      error: "The assistant requested too many tool calls in one turn. Please try again.",
     };
-    return { messages: [response] };
   } catch (err) {
     const vendorText = rawVendorErrorText(err);
     logger.error("LLM invocation failed", { modelSlug, vendorSlug: vendor.slug, vendorError: vendorText });

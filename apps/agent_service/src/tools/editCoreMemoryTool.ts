@@ -1,52 +1,43 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { updateCoreMemory } from "../memory/coreMemoryManager";
+import { updateCoreMemory } from "../sessionsManagment/coreMemoryManager";
 
 /**
- * LangChain tool that lets the scheduling agent autonomously update a
- * user's core memory file — the persistent `.md` rules stored on the
- * Docker volume at `/data/users/{userId}/core_memory.md`.
- *
- * Use this tool for **permanent** scheduling preferences (e.g. "Works from
- * home on Wednesdays", "Never schedule before 9 AM").  Do **not** use it
- * for one-time events or transient notes — those belong in episodic memory.
+ * LangChain tool factory: updates `users.user_identity` (JSONB) for the **current** thread user.
+ * `userId` is fixed by the server from graph state — the model only chooses action + content.
  */
-export const editCoreMemoryTool = tool(
-  async (input) => {
-    const { userId, action, content } = input;
-
-    const success = await updateCoreMemory(userId, action, content);
-
-    if (success) {
-      return `Core memory for user "${userId}" has been updated (action: ${action}).`;
-    }
-    return `Failed to update core memory for user "${userId}". Check logs for details.`;
-  },
-  {
-    name: "edit_core_memory",
-    description:
-      "Updates the user's persistent core memory file with permanent scheduling " +
-      "rules or preferences. Use 'append' to add a new rule to the existing file, or " +
-      "'rewrite' to replace the entire file when rules need major restructuring. " +
-      "Only use this for PERMANENT preferences (e.g. 'Always block 12-1 PM for lunch', " +
-      "'Prefers morning meetings'). Do NOT use for one-time events or transient reminders — " +
-      "those go into episodic memory instead.",
-    schema: z.object({
-      userId: z
-        .string()
-        .describe("The unique user identifier (`users.id`) whose core memory to update."),
-      action: z
-        .enum(["append", "rewrite"])
-        .describe(
-          "'append' adds a new rule to the end of the existing file. " +
-          "'rewrite' replaces the entire file content (use when removing or heavily restructuring rules).",
-        ),
-      content: z
-        .string()
-        .describe(
-          "The markdown-formatted text to write. For 'append', this is the new rule(s). " +
-          "For 'rewrite', this is the complete replacement content.",
-        ),
-    }),
-  },
-);
+export function createEditCoreMemoryTool(userId: string) {
+  return tool(
+    async (input) => {
+      const { action, content } = input;
+      const success = await updateCoreMemory(userId, action, content);
+      if (success) {
+        return `Core memory (user_identity) has been updated (action: ${action}).`;
+      }
+      return "Failed to update core memory. Check logs for details.";
+    },
+    {
+      name: "edit_core_memory",
+      description:
+        "Updates this user's persistent row in the database: `users.user_identity` (JSONB). " +
+        "Use a JSON **object** string for structured data. Action `rewrite` replaces the entire object; " +
+        "`append` shallow-merges new keys into the existing object. " +
+        "If you send plain text instead of JSON, it is stored under the `agentNotes` field (append concatenates). " +
+        "Use for long-term preferences and facts only — not one-off chat. Episodic memory holds transient context.",
+      schema: z.object({
+        action: z
+          .enum(["append", "rewrite"])
+          .describe(
+            "'rewrite' replaces user_identity (use JSON object). " +
+              "'append' merges a JSON object into existing user_identity, or appends plain text to agentNotes.",
+          ),
+        content: z
+          .string()
+          .describe(
+            "JSON object string, e.g. {\"timezone\":\"UTC\",\"preferredName\":\"Alex\"}. " +
+              "For rewrite, the full object; for append, keys to merge. Plain text merges into agentNotes.",
+          ),
+      }),
+    },
+  );
+}

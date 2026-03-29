@@ -1,5 +1,5 @@
 import { Thread, SingleChat, Group } from "@scheduling-agent/database";
-import { ensureSession } from "../memory/sessionRegistry";
+import { ensureSession } from "../sessionsManagment/sessionRegistry";
 import { logger } from "../logger";
 
 export class SessionsService {

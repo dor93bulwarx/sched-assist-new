@@ -10,8 +10,8 @@ import { getRedisConfig } from "../redisClient";
 import { executeChatTurn, storeMessageOnly } from "../chat/executeChatTurn";
 import { createThreadLockRedis, withThreadLock } from "./threadLock";
 import { emitAgentReply, emitAgentTyping } from "../socket";
-import { resolveCanonicalThreadId } from "../memory/canonicalThread";
-import { writeConversationMessage } from "../memory/conversationMessageWriter";
+import { resolveCanonicalThreadId } from "../sessionsManagment/canonicalThread";
+import { writeConversationMessage } from "../sessionsManagment/conversationMessageWriter";
 import { logger } from "../logger";
 
 const redisConfig = getRedisConfig();

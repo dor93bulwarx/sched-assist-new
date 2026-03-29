@@ -8,11 +8,11 @@ import type {
   SessionSummary,
 } from "@scheduling-agent/types";
 
-import { getCoreMemory } from "../../../memory/coreMemoryManager";
-import { retrieveEpisodicMemory } from "../../../memory/episodicRetrieval";
-import { loadRecentSessionSummaries } from "../../../memory/sessionSummaryLoader";
-import { embedText } from "../../../memory/embeddings";
-import { SchedulerAgentState } from "../../../state";
+import { getCoreMemory } from "../../../sessionsManagment/coreMemoryManager";
+import { retrieveEpisodicMemory } from "../../../rag/episodicRetrieval";
+import { loadRecentSessionSummaries } from "../../../sessionsManagment/sessionSummaryLoader";
+import { embedText } from "../../../rag/embeddings";
+import { AgentState } from "../../../state";
 import { logger } from "../../../logger";
 
 /**
@@ -27,7 +27,7 @@ import { logger } from "../../../logger";
  * into a system prompt that the model receives as durable instructions.
  */
 export async function buildContext(
-  state: SchedulerAgentState,
+  state: AgentState,
   _config: RunnableConfig,
 ): Promise<AssembledContext> {
   const { userId, userInput, threadId, groupId, singleChatId, agentId } = state;
@@ -88,8 +88,8 @@ export async function buildContext(
     // users / group_members may be empty — proceed without identity.
   }
 
-  // ── 2. Core memory (on-disk markdown) ──────────────────────────────
-  const coreMemory = await getCoreMemory(userId);
+  // ── 2. Core context: formatted users.user_identity (single-chat; group uses members above) ──
+  const coreMemory = await getCoreMemory(userId, groupId);
 
   // ── 3. Episodic snippets (pgvector, scoped by agentId) ────────────
   let episodicSnippets: string[] = [];
@@ -111,7 +111,6 @@ export async function buildContext(
     coreMemory,
     episodicSnippets,
     recentSessionSummaries,
-    userIdentity,
     groupMemberIdentities,
   );
 
@@ -131,9 +130,9 @@ export async function buildContext(
  * into state.  Suitable for use with `graph.addNode("assembleContext", contextBuilderNode)`.
  */
 export async function contextBuilderNode(
-  state: SchedulerAgentState,
+  state: AgentState,
   config: RunnableConfig,
-): Promise<Partial<SchedulerAgentState>> {
+): Promise<Partial<AgentState>> {
   if (state.error) return {};
 
   try {
@@ -167,7 +166,6 @@ function formatSystemPrompt(
   coreMemory: string,
   episodicSnippets: string[],
   recentSummaries: SessionSummary[],
-  identity: UserIdentity | null,
   groupMembers: GroupMemberContextProfile[] | null,
 ): string {
   const sections: string[] = [];
@@ -210,21 +208,16 @@ function formatSystemPrompt(
       }
       sections.push("");
     }
-  } else if (identity) {
-    sections.push("## User profile");
-    const pairs = Object.entries(identity)
-      .filter(([, v]) => v !== undefined && v !== null)
-      .map(([k, v]) => `- **${k}:** ${v}`);
-    if (pairs.length > 0) {
-      sections.push(pairs.join("\n"));
-    }
-    sections.push("");
   }
 
-  // Core memory (durable rules)
-  sections.push("## Core scheduling preferences");
-  sections.push(coreMemory);
-  sections.push("");
+  // Single-chat: `coreMemory` is formatted `users.user_identity` from getCoreMemory(). Group chats omit this block (members listed above).
+
+  const coreMemTrim = coreMemory.trim();
+  if (coreMemTrim.length > 0) {
+    sections.push("## Core memory (long-term preferences & facts)");
+    sections.push(coreMemory);
+    sections.push("");
+  }
 
   // Recent session summaries
   if (recentSummaries.length > 0) {

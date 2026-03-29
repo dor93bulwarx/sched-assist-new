@@ -1,14 +1,14 @@
-# Implementation Guide: Persistent Core Memory for Autonomous Scheduling Agent
+# Implementation Guide: Persistent Core Memory for Multi-Agent Conversations
 
 ## 1. Context & Architecture Overview
 
-You are assisting in building an autonomous scheduling AI agent using `LangGraph.js` and `TypeScript` within a Node.js Monorepo architecture.
+You are assisting in building configurable AI agents (each may specialize in different domains) using `LangGraph.js` and `TypeScript` within a Node.js Monorepo architecture.
 
 The agent utilizes a layered memory model (working, episodic, core, and session summaries):
 
 1. **Working Memory (session):** Managed by LangGraph's PostgreSQL checkpointer. **Session state is isolated per end user:** each person who talks with the model has **their own** conversation thread and checkpointed state. Memory from one user’s session must **not** leak into another’s—treat sessions as **separate** by design.
 2. **Episodic Memory:** Managed via `pgvector` in PostgreSQL for historical semantic search. Chunks are **produced by the LLM during session summarization** (see item 4)—the same model call that generates the summary also returns the conversation **pre-split into semantically coherent chunks** suitable for embedding. **Retrieval is scoped strictly to the active user:** every query for relevant chunks must filter by **`user_id`** so results are **only** episodes and documents belonging to **that** user. Never return or rank vectors for a different `user_id`. **In addition**, for each conversation turn's **assembled context**, you **also** load **recent session summaries** from the database (see item 4 and _Recent session summaries in context_)—these are **not** a substitute for pgvector; both are injected where appropriate.
-3. **Core Memory (Focus of this task):** A static `.md` file per user containing hard rules (e.g., "Works from home on Wednesdays")—also **per `user_id`**, on disk under `/data/users/{user_id}/`.
+3. **Core Memory (Focus of this task):** Durable per-user facts and preferences stored in PostgreSQL as **`users.user_identity`** (JSONB). The agent may update this via the **`edit_core_memory`** tool (`append` shallow-merges a JSON object; `rewrite` replaces the object). Plain text falls back to an `agentNotes` string field inside the same JSONB.
 4. **Session summarization (archival + context read-back):** When a chat **ends** (TTL) or **exceeds size limits**, a **summary is written to the `summary` JSONB column** on the corresponding **`threads`** row by a **dedicated graph node**—see _Session summarization_ below. On **each** conversation's context assembly, **reload** the **two most recent** such summaries scoped to the same **`single_chat_id`** or **`group_id`** (as applicable) from the **last 48 hours** into the prompt **in addition to** pgvector hits—see _Recent session summaries in context_. This is separate from core rules and from the live Postgres checkpoint.
 
 ### Who is talking to the model? (`user_id` at the boundary)
@@ -31,7 +31,7 @@ This guide assumes that **somewhere upstream**—the **user-facing application**
    - Optional (for summarization / TTL): `last_activity_at`, `ttl_expires_at`, `summarized_at`, `checkpoint_size_bytes` (or similar) to drive _Session summarization_ triggers.
    - `summary` (JSONB, nullable): stores the LLM-generated session summary directly in the row (see _Session summarization_).
 
-   **Who writes the row:** Typically **`user_app`** (after auth) when starting or **resuming** a chat: it resolves **`user_id`**, **`agent_id`** (which logical agent), creates or selects a **`single_chats`** row (or **`groups`** context), allocates or reuses **`thread_id`**, **inserts or updates** the registry row with **`single_chat_id`** and/or **`group_id`**, then calls **`agent_service`** with **`thread_id`** and enough context to load **`agents.agent_identity`** and user profile data (or only `thread_id` if the agent hydrates from this table at run start—either pattern is fine if documented).
+   **Who writes the row:** Typically **`user_app`** (after auth) when starting or **resuming** a chat: it resolves **`user_id`**, **`agent_id`** (which logical agent), creates or selects a **`single_chats`** row (or **`groups`** context), allocates or reuses **`thread_id`**, **inserts or updates** the registry row with **`single_chat_id`** and/or **`group_id`**, then calls **`agent_service`** with **`thread_id`** and enough context to load **`agents`** (`definition`, **`core_instructions`**) and user profile data (or only `thread_id` if the agent hydrates from this table at run start—either pattern is fine if documented).
 
 3. **Where in the repo:**
    - **Registry model + migration:** `packages/database/src/models/Thread.ts` (name as you prefer) and `packages/database/src/migrations/…`.
@@ -42,7 +42,7 @@ This guide assumes that **somewhere upstream**—the **user-facing application**
 
 ### Session summarization (`summary` JSONB in `threads`)
 
-When a **session ends** or must be **compacted**, persist a **written summarization** of that session so long-term memory and audits are not limited to the live checkpoint. Store the summary **in the `summary` JSONB column** of the **`threads`** row for that `thread_id`—**not** mixed into `core_memory.md` (which remains for durable _rules_) and **not** as files on disk.
+When a **session ends** or must be **compacted**, persist a **written summarization** of that session so long-term memory and audits are not limited to the live checkpoint. Store the summary **in the `summary` JSONB column** of the **`threads`** row for that `thread_id`—**not** mixed into **`users.user_identity`** (durable user profile / core memory) and **not** as ad hoc files on disk.
 
 **Triggers (configure via env / config; implement consistently):**
 
@@ -70,9 +70,9 @@ The `summary` JSONB column on the **`threads`** table. The JSONB payload should 
 When the summarization node calls the model (via `llm.withStructuredOutput`), the prompt **must** instruct the LLM to return its `chunks` array with entries that are:
 
 1. **Semantically self-contained:** Each chunk must make sense on its own. A reader (or a retrieval query) seeing **only** that chunk must not be misled or get a meaning opposite to the original intent. Avoid splitting mid-thought, mid-condition, or between a statement and its critical qualifier. For example, a chunk must **never** contain only _"drinking alcohol during pregnancy is necessary"_ when the full sentence is _"drinking alcohol during pregnancy is necessary **if you want to maximize the risks for the newborn**"_ — the qualifier **must** stay with the claim.
-2. **Logically grouped:** Related exchanges (e.g. a full Q&A about a scheduling preference, an entire negotiation about a meeting time) should stay together in one chunk rather than being split across two.
+2. **Logically grouped:** Related exchanges (e.g. a full Q&A on one topic, a complete negotiation) should stay together in one chunk rather than being split across two.
 3. **Sized for retrieval:** Each chunk should be substantial enough to carry useful context (not single-sentence fragments) but small enough that the embedding captures a focused topic. Instruct the model to aim for roughly **3–8 sentences** per chunk (adjust as needed), and to prefer more chunks over fewer if a single chunk would cover unrelated topics.
-4. **Attributed:** Each chunk should include brief contextual framing (e.g. _"The user discussed rescheduling their Wednesday stand-up…"_) so that when retrieved out of order, the chunk is understandable without the surrounding conversation.
+4. **Attributed:** Each chunk should include brief contextual framing (e.g. _"The user asked about X and agreed to Y…"_) so that when retrieved out of order, the chunk is understandable without the surrounding conversation.
 
 ### Recent session summaries in context (read path)
 
@@ -85,15 +85,15 @@ This **48-hour / top-two** rule is **additive** to pgvector—implement in a sma
 
 ### The Docker Constraint
 
-The system runs in Docker containers. To prevent "amnesia" when containers restart, **Core Memory** files are **NOT** stored inside application source (`/apps` or `/packages`). They live on a **mounted Docker Volume** mapped to **`/app/data`** (or equivalent) inside the container. **Session summaries** are stored in PostgreSQL (the `summary` JSONB column on `threads`), which already persists across container restarts via its own volume.
+The system runs in Docker containers. **Core user memory** (`users.user_identity`) and **session summaries** (`threads.summary`) live in **PostgreSQL** and persist with the database volume—**not** in markdown files under `/app/data`. Optional app-specific file mounts (e.g. for exports) are separate from core memory.
 
 ### Docker Compose and per-service Dockerfiles
 
 Deployment is defined with **Docker Compose** (or equivalent orchestration) on top of **Dockerfiles**—one image per major runtime, not a single “fat” container for everything.
 
-- **Separate containers:** The **MCP server** and the **scheduling agent** (`agent_service`) run in **different** containers. Each service has its own Dockerfile (for example under `apps/mcp_server/` and `apps/agent_service/`), built from the **monorepo root** context so `npm` workspaces resolve shared packages (`@scheduling-agent/types`, `@scheduling-agent/database`, etc.).
+- **Separate containers:** The **MCP server** and the **agent service** (`agent_service`) run in **different** containers. Each service has its own Dockerfile (for example under `apps/mcp_server/` and `apps/agent_service/`), built from the **monorepo root** context so `npm` workspaces resolve shared packages (`@scheduling-agent/types`, `@scheduling-agent/database`, etc.).
 - **Typical build pattern:** Multi-stage builds—a **builder** stage copies root manifests, shared `packages/`, and the target `apps/<service>/`, runs `npm install` and workspace builds in dependency order; a **runner** stage copies only compiled output plus what is needed to `npm install --omit=dev` and start that workspace.
-- **Agent container:** Mount the persistent **`/data`** volume (or equivalent) into the agent image at the path your code expects (e.g. `/app/data`) for **core memory** files, as described in _The Docker Constraint_ above.
+- **Agent container:** Mount volumes as needed for logs or exports; **core memory** for users is **not** file-based in this architecture.
 
 Example shape for the **MCP server** image (adjust paths and workspace names to match this repo’s `package.json` workspaces):
 
@@ -144,7 +144,7 @@ The **relational database** is **PostgreSQL**, run from the **official image** (
 
 ### Database schema (reference)
 
-Implement the following in **`packages/database`** as **Sequelize models** + **migrations**. Names and types may be adjusted (e.g. embedding dimension) but **must** preserve **`user_id` isolation** for episodic data (and core memory paths), **`thread_id` uniqueness** for session registry, and a clear link from each **`threads`** row to **which agent** (via **`single_chats`** / **`groups`** → **`agents`**).
+Implement the following in **`packages/database`** as **Sequelize models** + **migrations**. Names and types may be adjusted (e.g. embedding dimension) but **must** preserve **`user_id` isolation** for episodic data and **`users.user_identity`**, **`thread_id` uniqueness** for session registry, and a clear link from each **`threads`** row to **which agent** (via **`single_chats`** / **`groups`** → **`agents`**).
 
 #### Extensions (migration)
 
@@ -159,24 +159,26 @@ Resolves **`user_id`** to a stable record for joins and lookups, and stores core
 | `id`                | UUID or STRING | PK              | Canonical user id (`user_id` elsewhere) |
 | `external_ref`      | VARCHAR        | nullable, unique| Optional SSO / external directory id             |
 | `display_name`      | VARCHAR        | nullable        |                                            |
-| `user_identity`     | JSONB          | nullable        | Core info about the user (e.g. `{ role, department, manager, location, timezone, startDate }`)—structured data the agent can reference for scheduling context |
+| `user_identity`     | JSONB          | nullable        | Core info about the user (e.g. `{ role, department, manager, location, timezone, startDate }`)—structured data the agent can reference in conversation |
 | `password`          | VARCHAR        | nullable        | If present, used for local auth (hash at rest) |
 | `created_at`        | TIMESTAMPTZ    | NOT NULL        |                                            |
 | `updated_at`        | TIMESTAMPTZ    | NOT NULL        |                                            |
 
 #### Table: `agents` (Sequelize model: `Agent.ts`)
 
-**Registry of distinct agents** (multiple scheduling personalities, models, or product lines). Each **1:1** chat (**`single_chats`**) and each **group** (**`groups`**) references exactly one **`agents`** row. **`agent_identity`** is merged into the **system prompt** on every turn (via **`contextBuilder`** or equivalent).
+**Registry of distinct agents** (multiple personas, specializations, or product lines). Each **1:1** chat (**`single_chats`**) and each **group** (**`groups`**) references exactly one **`agents`** row. **`core_instructions`** (and optional **`definition`**) are merged into the **system prompt** on every turn (via **`contextBuilder`** or equivalent).
 
-| Column            | Type        | Constraints | Notes                                                                 |
-| ----------------- | ----------- | ----------- | --------------------------------------------------------------------- |
-| `id`              | UUID        | PK          | Stable agent identifier (`agent_id` elsewhere)                         |
-| `name`            | VARCHAR     | NOT NULL    | Display name (e.g. "AI Default assistant — default")                 |
-| `agent_identity`  | JSONB       | NOT NULL    | Structured instructions/persona injected into the system prompt each turn (e.g. `{ tone, domainFocus, toolHints }` ) — shape is product-defined |
-| `created_at`      | TIMESTAMPTZ | NOT NULL    |                                                                       |
-| `updated_at`      | TIMESTAMPTZ | NOT NULL    |                                                                       |
+| Column              | Type        | Constraints | Notes                                                                 |
+| ------------------- | ----------- | ----------- | --------------------------------------------------------------------- |
+| `id`                | UUID        | PK          | Stable agent identifier (`agent_id` elsewhere)                         |
+| `core_instructions` | TEXT        | nullable    | Long-form instructions for the model (injected each turn)            |
+| `definition`        | VARCHAR     | nullable    | Short label or one-line description (UX / prompt header)             |
+| `single_chat_id`    | UUID        | nullable, unique | Optional FK — when set, this agent row is exclusive to that 1:1 chat |
+| `group_id`          | UUID        | nullable, unique | Optional FK — when set, exclusive to that group                      |
+| `created_at`        | TIMESTAMPTZ | NOT NULL    |                                                                       |
+| `updated_at`        | TIMESTAMPTZ | NOT NULL    |                                                                       |
 
-**Indexes:** optional index on **`(name)`** if you search by name.
+**Indexes:** as needed for listing by `single_chat_id` / `group_id` (uniqueness already enforces at most one agent per optional scope).
 
 #### Table: `single_chats` (Sequelize model: `SingleChat.ts`)
 
@@ -195,7 +197,7 @@ Resolves **`user_id`** to a stable record for joins and lookups, and stores core
 
 #### Table: `groups` (Sequelize model: `Group.ts`)
 
-**Logical grouping** for team or shared contexts (e.g. a group chat or shared scheduling scope). Referenced by **`group_members`** and optionally by **`threads.group_id`**. **Which agent** moderates or represents the group in the UI is **`agents.id`** via **`agent_id`**.
+**Logical grouping** for team or shared contexts (e.g. a group chat). Referenced by **`group_members`** and optionally by **`threads.group_id`**. **Which agent** moderates or represents the group in the UI is **`agents.id`** via **`agent_id`**.
 
 | Column       | Type        | Constraints | Notes                                      |
 | ------------ | ----------- | ----------- | ------------------------------------------ |
@@ -302,13 +304,14 @@ A **graph run ending** does **not** invalidate **`thread_id`**: the next user me
 
 **Concurrency:** two concurrent requests with the **same** **`thread_id`** can race; **serialize** updates per thread or use a queue if needed.
 
-#### Not stored in Postgres (this architecture)
+#### Core memory vs session archives (this architecture)
 
-| Artifact              | Location                                                                 |
-| --------------------- | ------------------------------------------------------------------------ |
-| Core rules markdown   | Volume: `/data/users/{user_id}/core_memory.md`                        |
+| Concern                    | Location                                                                 |
+| -------------------------- | ------------------------------------------------------------------------ |
+| Durable user preferences   | Postgres: **`users.user_identity`** (JSONB), updated via `edit_core_memory` tool |
+| Session archival summaries | Postgres: **`threads.summary`** (JSONB)                                  |
 
-> **Note:** Session summaries **are** stored in Postgres, in the `summary` JSONB column on `threads`. They do **not** use on-disk files.
+> **Note:** Session summaries do **not** belong in `user_identity`; keep session archives and long-term user profile separate.
 
 ---
 
@@ -322,15 +325,15 @@ Your generated code must align with this layout. **Primary focus for the deliver
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`user_id` at the user ↔ app boundary**              | `apps/user_app` (or your BFF/API gateway name)—authenticates and **attaches `user_id`** to requests / graph invocations (details demonstrated later).                                                                                                                                   |
 | **Per-user session (working memory / checkpointer)** | LangGraph **Postgres checkpointer** (same DB) keyed by **`thread_id`**; **`thread_id` ↔ `single_chat_id` / `group_id`** in a Sequelize **registry table** in `packages/database` (see _Storing sessions for each user_). Wired in `agent_service/src/graph` + `user_app` when starting/resuming a chat. |
-| **Episodic `pgvector` (always filter by `user_id`)**  | Sequelize models + migrations in `packages/database`; retrieval in `agent_service/src/memory/episodicRetrieval.ts` (queries **only** with `user_id`, resolved via **`single_chats`** or group membership).                                                                                                                                   |
+| **Episodic `pgvector` (scoped by agent / user per implementation)**  | Sequelize models + migrations in `packages/database`; retrieval in `agent_service/src/rag/episodicRetrieval.ts` (must not leak other users’ episodes—follow the project’s isolation rules).                                                                                                                                   |
 | **Recent session summaries (48h window)**            | `sessionSummaryLoader.ts` (or equivalent): for each turn, query **`threads`** for **up to 2** newest summaries (where `summary IS NOT NULL` and `summarized_at` within **last 48 hours**) scoped by **`single_chat_id`** or **`group_id`**; merge into context **together with** pgvector—see _Recent session summaries in context_. |
-| **Agent identity in prompt**                         | Load **`agents.agent_identity`** (JSONB) for the active **`agent_id`** (from **`single_chats`** or **`groups`**) and merge into the system prompt each turn—typically in **`contextBuilder`**.                                                                                                                                                                                                                    |
-| **Core memory `.md` on disk**                        | `coreMemoryManager.ts` + mounted `/data` (not in git).                                                                                                                                                                                                                                 |
+| **Agent instructions in prompt**                     | Load **`agents.core_instructions`** and **`agents.definition`** for the active **`agent_id`** (from **`single_chats`** or **`groups`**) and merge into the system prompt each turn—typically in **`contextBuilder`**.                                                                                                                                                                                                                    |
+| **Core memory (`user_identity`)**                  | `sessionsManagment/coreMemoryManager.ts` — read/merge JSONB on `users`.                                                                                                                                                                                                                |
 | **Session summarization (TTL / size)**               | **Mandatory** `graph/nodes/sessionSummarization.ts` (or similar): **single LLM call** produces summary + semantically coherent chunks → writes `summary` JSONB to `threads` **and** embeds + inserts chunks into `episodic_memory`. Triggered when **TTL** or **checkpoint size** threshold is exceeded—see _Session summarization_ and _Typical request flow_. |
 | **MCP vs agent processes**                           | Separate apps: `apps/mcp_server` and `apps/agent_service`, each with its own Dockerfile.                                                                                                                                                                                               |
 | **Postgres + migrations**                            | `packages/database` migrations; DB service in Compose at repo root.                                                                                                                                                                                                                    |
 
-/scheduling*agent_workspace (Monorepo Root)
+/dorclaw_workspace (Monorepo Root)
 ├── docker-compose.yml # postgres (+ pgvector image or init), agent_service, mcp_server, volumes, env; migration bootstrap optional
 ├── package.json # npm workspaces (root)
 ├── tsconfig.base.json
@@ -345,24 +348,25 @@ Your generated code must align with this layout. **Primary focus for the deliver
 │ │ └── /src
 │ │ └── ...
 │ │
-│ └── /agent_service # Scheduling LangGraph agent (own Dockerfile) — **you are coding here** for this guide
+│ └── /agent_service # LangGraph agent service (own Dockerfile) — **you are coding here** for this guide
 │ ├── Dockerfile
 │ └── /src
-│ ├── /graph
+│ ├── /graphs/basicGraph
 │ │ ├── index.ts # compile graph, Postgres checkpointer; invoke/stream with configurable.thread_id
-│ │ ├── contextBuilder.ts
 │ │ └── /nodes
-│ │ ├── ... # (mirror graphs-example style)
-│ │ └── sessionSummarization.ts # runs when session ends (TTL/size); LLM produces summary + chunks → writes threads + episodic_memory
+│ │ ├── contextBuilder.ts
+│ │ ├── sessionSummarization.ts # TTL/size; LLM summary + chunks → threads + episodic_memory
+│ │ └── ... # (mirror graphs-example style)
 │ ├── state.ts # LangGraph state shape; MUST include user_id and agent_id (or resolvable from single_chat_id — set when thread starts from user_app)
-│ ├── /memory
-│ │ ├── coreMemoryManager.ts # core_memory.md under /data/users/{user_id}/
-│ │ ├── episodicRetrieval.ts # loads relevant pgvector chunks — queries MUST filter by user_id only
+│ ├── /sessionsManagment
+│ │ ├── coreMemoryManager.ts # reads / updates users.user_identity (JSONB) via tool
 │ │ ├── sessionSummaryLoader.ts # queries threads for up to 2 newest summaries in last 48h (single_chat_id / group_id)
-│ │ ├── sessionRegistry.ts # optional: helpers to read/validate thread_id ↔ single_chat_id / group_id via @scheduling-agent/database
-│ │ └── sessionSummaryWriter.ts # optional: writes summary JSONB to threads via Sequelize (called from summarization node)
+│ │ └── sessionRegistry.ts # helpers: thread_id ↔ single_chat_id / group_id
+│ ├── /rag
+│ │ ├── episodicRetrieval.ts # pgvector — filter by user_id
+│ │ └── sessionSummaryChunksWriter.ts # summarization node persists chunks
 │ └── /tools
-│ └── editCoreMemoryTool.ts
+│ └── editCoreMemoryTool.ts # updates users.user_identity
 │
 ├── /packages
 │ ├── /types # Shared types ('@scheduling-agent/types')
@@ -373,20 +377,19 @@ Your generated code must align with this layout. **Primary focus for the deliver
 │ │ ├── Thread.ts # registry + summary: thread_id ↔ single_chat_id / group_id, summary JSONB (working-memory sessions; not the checkpoint blobs)
 │ │ ├── EpisodicMemory.ts # episodic rows/chunks; schema MUST support user_id for isolation + vector column(s)
 │ │ ├── User.ts # users table
-│ │ ├── Agent.ts # agents registry + agent_identity JSONB
+│ │ ├── Agent.ts # agents: core_instructions, definition, optional single_chat_id / group_id
 │ │ ├── SingleChat.ts # single_chats: 1:1 user ↔ agent
 │ │ ├── Group.ts # groups table (+ agent_id)
 │ │ └── GroupMember.ts # group_members junction
 │ ├── /src/migrations # Sequelize migrations: Postgres + extensions (e.g. vector), users, agents, single_chats, groups, group_members, threads, checkpointer tables if not created by lib, episodic tables
 │ └── /src/connection.ts # Sequelize init; env from Compose
 │
-└── core_memory.md
 
-`episodicRetrieval.ts`, `sessionSummarization` / `sessionSummaryWriter`, `user_app`, and the full `graph/index.ts` wiring may be implemented in later milestones; the structure above still applies so **session**, **session summaries (in DB)**, **episodic (`user_id`)**, and **core file** concerns stay in separate, obvious places.
+`episodicRetrieval.ts`, `sessionSummarization`, `user_app`, and the full graph wiring may be implemented in later milestones; the structure above still applies so **session**, **session summaries (in DB)**, **episodic (`user_id`)**, and **core user identity (DB)** stay in separate, obvious places.
 
 ### Reference implementation (`graphs-example/`)
 
-**Important:** The code under `graphs-example/` is **not** this scheduling project. It comes from a **completely different** product and problem domain. Do **not** copy its business logic, naming, or domain concepts into the scheduling agent.
+**Important:** The code under `graphs-example/` is **not** this product’s domain. It comes from a **completely different** product and problem domain. Do **not** copy its business logic, naming, or domain concepts into this repo’s agents.
 
 It is included **only** as a **structural and readability reference**: how to organize graphs, nodes, tools, and related functions so the codebase stays clear and consistent. Before implementing graphs, nodes, or tools here, **skim those files** for layout, patterns, and typing—not for subject matter.
 
@@ -397,7 +400,7 @@ It is included **only** as a **structural and readability reference**: how to or
 | **Tools** (`@tool`, schemas, invocation) | `graphs-example/tools/insertMemoryTool.ts`                                       |
 | **State**                                | `graphs-example/state.ts`                                                          |
 
-Use them to mirror **structure, typing, and layering** for this repo’s scheduling components—not as copy-paste boilerplate and not as a model of _what_ the agent should do, only _how_ similar pieces are built.
+Use them to mirror **structure, typing, and layering** for this repo’s agent components—not as copy-paste boilerplate and not as a model of _what_ the agent should do, only _how_ similar pieces are built.
 
 ---
 
@@ -405,27 +408,27 @@ Use them to mirror **structure, typing, and layering** for this repo’s schedul
 
 Write the robust TypeScript implementation for the Core Memory management. This includes:
 
-1. A File System utility class/functions to safely read and write to the mounted volume.
-2. A LangChain/LangGraph `@tool` (`editCoreMemory`) that the AI agent can invoke to update these files autonomously.
-3. A **real** Context Builder in `contextBuilder.ts` that loads core memory from disk, pulls **episodic** context via **`pgvector`** (for `user_id`), loads **`agents.agent_identity`** for the active agent, loads **up to two** recent session summaries from **`threads`** (JSONB `summary` column) per _Recent session summaries in context_, and uses **Sequelize** where needed to resolve **user** / **single_chat** / **group** / **agent** context—then injects the combined instructions into the LLM prompt—aligned with patterns in `graphs-example/`, not a stub or placeholder.
+1. Helpers to **read and update** `users.user_identity` (JSONB) in PostgreSQL—no markdown file as the source of truth.
+2. A LangChain/LangGraph `@tool` (`edit_core_memory`) that the agent invokes to **merge or replace** `user_identity` (JSON object strings; plain text maps to `agentNotes`).
+3. A **real** Context Builder in `contextBuilder.ts` that loads formatted **`user_identity`** for the prompt, pulls **episodic** context via **`pgvector`** (for `user_id`), loads **`agents.core_instructions`** (and related fields) for the active agent, loads **up to two** recent session summaries from **`threads`** (JSONB `summary` column) per _Recent session summaries in context_, and uses **Sequelize** where needed to resolve **user** / **single_chat** / **group** / **agent** context—then injects the combined instructions into the LLM prompt—aligned with patterns in `graphs-example/`, not a stub or placeholder.
 
 ---
 
 ## 4. Technical Requirements & Constraints
 
 - **Language:** TypeScript (Node.js).
-- **File System:** Use native Node.js `fs/promises` or `fs`.
-- **Graceful Handling:** The code MUST handle cases where the directory (`/app/data/users/{user_id}`) or `core_memory.md` does not exist yet. Create missing directories automatically before writes. Session summaries are read from the database and do not require filesystem handling.
-- **Tool Interface:** The `editCoreMemory` tool must support at least two actions:
-  - `append`: Adds a new rule to the end of the file.
-  - `rewrite`: Replaces the entire content of the file (useful if the agent needs to delete or heavily modify rules).
+- **Persistence:** Core user memory lives in **`users.user_identity`** (JSONB), not in a per-user markdown file.
+- **Graceful Handling:** Handle missing or null `user_identity`; merges must not corrupt JSON. Session summaries are read from **`threads`** only.
+- **Tool Interface:** The `edit_core_memory` tool must support at least two actions:
+  - `append`: Shallow-merge a JSON object into `user_identity`, or append plain text to `agentNotes`.
+  - `rewrite`: Replace `user_identity` entirely with a JSON object (or set `agentNotes` only if plain text).
 - **Strict Layering:** Assume types (like `UserId`) are imported from `@scheduling-agent/types`. Do not redefine database models here.
 - **Database:** PostgreSQL is provided by Docker Compose. Use **Sequelize** in `@scheduling-agent/database`; **do not** embed raw DDL in the agent app. Schema changes belong in **Sequelize migrations** in that package. The agent reads connection settings from environment variables wired in Compose. **Canonical tables and columns:** see **Database schema (reference)** under §1.
 - **Per-user isolation:** **Working memory** must remain **separate per user** (one session / thread per conversing user—no shared checkpoint state across users). **Episodic retrieval** over **`pgvector`** must include a **hard filter on `user_id`** so embedded chunks are **only** those belonging to the user currently talking to the agent. Implementations that omit this filter are incorrect.
-- **Context assembly (per turn):** The LLM context must combine **(a)** **`pgvector`** episodic snippets for **`user_id`**, **(b)** **up to two** session summaries scoped to the active **`single_chat_id`** or **`group_id`** from the **last 48 hours** (newest first, from the `summary` JSONB column on `threads`), **(c)** **`agents.agent_identity`** (JSONB) for the active agent, and **(d)** core memory and other nodes as designed. **(a)**, **(b)**, and **(c)** are all part of the intended prompt assembly; **(b)** is loaded from **`threads`** only, not from pgvector.
+- **Context assembly (per turn):** The LLM context must combine **(a)** **`pgvector`** episodic snippets for **`user_id`**, **(b)** **up to two** session summaries scoped to the active **`single_chat_id`** or **`group_id`** from the **last 48 hours** (newest first, from the `summary` JSONB column on `threads`), **(c)** **`agents`** instructions (`core_instructions`, `definition`, etc.) for the active agent, and **(d)** formatted **`users.user_identity`** (core memory) and other nodes as designed. **(a)**, **(b)**, and **(c)** are all part of the intended prompt assembly; **(b)** is loaded from **`threads`** only, not from pgvector.
 - **Sessions:** Persist LangGraph state with the **Postgres checkpointer** using a distinct **`thread_id` per conversation**; store **`thread_id` ↔ `user_id`** (and/or **`single_chat_id` / `group_id`** when those tables exist) in the **`threads`** table (`Thread` model in `@scheduling-agent/database`). Do not reuse the same `thread_id` across different users in a way that breaks isolation.
 - **LangGraph checkpointer vs app logic:** Checkpoint **save/load** is handled by **`@langchain/langgraph-checkpoint-postgres`** when you pass **`thread_id`**; **TTL**, **size guards**, **trim/reset** policy, **`user_id`** / **`agent_id`** resolution (via **`single_chats`** / **`groups`**), and the **mandatory LLM summarization node** when thresholds fire are **application** concerns—see **What `@langchain/langgraph-checkpoint-postgres` does (and does not)** under §1 (Database schema).
-- **Session summarization:** When a session **ends** or **TTL** / **size** thresholds are exceeded, a **mandatory graph node** must **invoke the LLM** (via `withStructuredOutput`) to produce **both** summary text **and** an array of semantically coherent chunks (see _LLM-driven semantic chunking_ under §1). The summary is written to the **`summary` JSONB column** on the corresponding **`threads`** row (and set `summarized_at`); the chunks are embedded and inserted into **`episodic_memory`** with the correct `user_id`. Do not store these summaries inside `core_memory.md`; keep rules and session archives separate. Implement **TTL** and **size** thresholds via config and/or `threads` row metadata. **Skipping LLM summarization when a threshold fires is incorrect.**
+- **Session summarization:** When a session **ends** or **TTL** / **size** thresholds are exceeded, a **mandatory graph node** must **invoke the LLM** (via `withStructuredOutput`) to produce **both** summary text **and** an array of semantically coherent chunks (see _LLM-driven semantic chunking_ under §1). The summary is written to the **`summary` JSONB column** on the corresponding **`threads`** row (and set `summarized_at`); the chunks are embedded and inserted into **`episodic_memory`** with the correct `user_id`. Do not store these summaries inside **`users.user_identity`**; keep durable user profile and session archives separate. Implement **TTL** and **size** thresholds via config and/or `threads` row metadata. **Skipping LLM summarization when a threshold fires is incorrect.**
 - **Structured LLM output:** Whenever the application needs **structured data** back from the LLM (not free-form chat), use **`llm.withStructuredOutput(schema)`** with a **Zod schema** describing the expected shape. Do **not** ask the model to return JSON in a plain `invoke` call and then manually parse it—`withStructuredOutput` handles validation and parsing automatically. This applies to session summarization (summary + chunks), and to any future node or tool that requires a typed response from the model.
 
 ---
@@ -434,36 +437,31 @@ Write the robust TypeScript implementation for the Core Memory management. This 
 
 Please generate the following TypeScript files based on the architecture:
 
-### Deliverable A: `src/memory/coreMemoryManager.ts`
+### Deliverable A: `src/sessionsManagment/coreMemoryManager.ts`
 
-Write a utility module with two exported functions:
+Write a utility module with:
 
-- `getCoreMemory(userId: string): Promise<string>` - Reads the markdown file. Returns a default string (e.g., "No specific core preferences set.") if the file doesn't exist.
-- `updateCoreMemory(userId: string, action: 'append' | 'rewrite', content: string): Promise<boolean>` - Writes to the file. Ensures the directory tree exists before writing.
+- `getCoreMemory(userId, groupId): Promise<string>` — formats **`users.user_identity`** from the DB for the system prompt (single-chat); group chats typically omit this block when identities appear under members.
+- `updateCoreMemory(userId, action: 'append' | 'rewrite', content: string): Promise<boolean>` — updates **`users.user_identity`** via Sequelize (`append` merges JSON; `rewrite` replaces; plain text uses `agentNotes`).
 
 ### Deliverable B: `src/tools/editCoreMemoryTool.ts`
 
-Wrap the `updateCoreMemory` function into a LangChain Dynamic Structured Tool (`DynamicStructuredTool` or `@tool` decorator).
+Wrap `updateCoreMemory` in a LangChain `@tool` with a clear description (JSON object vs plain text) and a `zod` schema (`userId`, `action`, `content`).
 
-- Include a highly descriptive `description` so the LLM knows _exactly_ when to use it (only for permanent preferences, not one-time events).
-- Use `zod` for the input schema (`userId`, `action`, `content`).
+### Deliverable C: `src/graphs/basicGraph/nodes/contextBuilder.ts`
 
-### Deliverable C: `src/graph/contextBuilder.ts`
+Implement a **production-style** context builder: a LangGraph node or helper that:
 
-Implement a **production-style** context builder (not a mock): an async function (or small module) fit for use as a **LangGraph node** or as a helper invoked from one, following the same structural style as `graphs-example/`.
-
-It must:
-
-1. **Resolve the active user** and **agent** from **`user_id`**, **`agent_id`**, and/or **`single_chat_id`** / **`group_id`** already carried in graph state (set by the **user ↔ application** layer when a thread starts—see _Who is talking to the model?_ above) and/or **`@scheduling-agent/database`** Sequelize models—using real imports and types, assuming migrations have created the needed tables. **Load `agents.agent_identity`** for the active agent and merge it into the system prompt. Do not infer identity from free text alone.
-2. Call **`getCoreMemory(userId)`** from `coreMemoryManager.ts` and incorporate the returned markdown into the **system** / developer instructions string passed to the LLM (prepend or clearly delimit so the model treats it as durable preferences).
-3. Load **episodic** context for **`user_id`** via **`episodicRetrieval.ts`** (pgvector, **hard `user_id` filter**) and load **up to two** session summaries for the active **`single_chat_id`** or **`group_id`** from the **last 48 hours** via **`sessionSummaryLoader.ts`** (or inline equivalent, querying `threads` for rows with `summary IS NOT NULL` and `summarized_at` within 48h), per _Recent session summaries in context_. Merge **`agents.agent_identity`** into the system instructions for the resolved **`agent_id`**. These pieces are **in addition** to each other.
-4. Handle missing or empty core memory, no qualifying session summaries, or empty episodic results gracefully (clear defaults or omitted sections).
-5. Remain **testable and side-effect bounded**: file I/O for core memory **reads** via the dedicated memory helpers; DB access only through the shared package's models for episodic and session-summary queries—no ad hoc SQL strings in this file.
+1. Resolves **user** / **agent** / **single_chat** / **group** from graph state and Sequelize models.
+2. Loads **`agents`** fields (`core_instructions`, `definition`, …) for the active agent.
+3. Calls **`getCoreMemory`** and injects formatted **`user_identity`** into the system prompt where appropriate.
+4. Loads episodic snippets and recent session summaries per §1.
+5. Handles empty sections gracefully. DB access through shared models only.
 
 ---
 
 ## 6. Coding Standards
 
 - Write clean, self-documenting code.
-- Use `try/catch` blocks for file system operations to prevent unhandled promise rejections that could crash the agent's container.
-- Add minimal, descriptive comments explaining the Docker volume awareness (e.g., "Points to the mounted volume path") for **`core_memory.md`** and the database-backed nature of session summaries.
+- Use `try/catch` around DB and tool calls where appropriate so failures surface as logged errors rather than silent crashes.
+- Document that **core memory** is **`users.user_identity`**, not a filesystem artifact; session summaries live on **`threads.summary`**.

@@ -2,14 +2,14 @@ import { Annotation } from "@langchain/langgraph";
 import type { BaseMessage } from "@langchain/core/messages";
 
 /**
- * LangGraph state annotation for the scheduling agent.
+ * LangGraph state annotation for conversational agents (any specialization).
  *
  * `userId` is set once when the thread is created (by the user-facing
  * application layer) and carried through every node so that memory
  * retrieval, core-file I/O, and session isolation can always scope to
  * the correct user without re-resolving identity.
  */
-export const SchedulerAgentAnnotation = Annotation.Root({
+export const AgentAnnotation = Annotation.Root({
   /** The user who owns this conversation thread (`users.id`). */
   userId: Annotation<string>,
 
@@ -80,4 +80,5 @@ export const SchedulerAgentAnnotation = Annotation.Root({
   }),
 });
 
-export type SchedulerAgentState = typeof SchedulerAgentAnnotation.State;
+export type AgentState = typeof AgentAnnotation.State;
+  

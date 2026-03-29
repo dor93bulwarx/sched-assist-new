@@ -2,9 +2,9 @@ import { RunnableConfig } from "@langchain/core/runnables";
 import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
-import type { SchedulerAgentState } from "../../../state";
-import { persistSummarizationResult } from "../../../memory/sessionSummaryChunksWriter";
-import { embedText } from "../../../memory/embeddings";
+import type { AgentState } from "../../../state";
+import { persistSummarizationResult } from "../../../rag/sessionSummaryChunksWriter";
+import { embedText } from "../../../rag/embeddings";
 import { getLangfuseCallbackHandler, observeWithContext } from "../../../langfuse";
 import { logger } from "../../../logger";
 import { Vendor } from "@scheduling-agent/database";
@@ -51,9 +51,9 @@ async function getSummarizationLlm(): Promise<ChatOpenAI> {
  *   2. Embeds and inserts each chunk into `episodic_memory` for the user.
  */
 export async function sessionSummarizationNode(
-  state: SchedulerAgentState,
+  state: AgentState,
   _config: RunnableConfig,
-): Promise<Partial<SchedulerAgentState>> {
+): Promise<Partial<AgentState>> {
   if (state.error) return {};
 
   const { userId, threadId, agentId, messages } = state;
@@ -107,11 +107,11 @@ export async function sessionSummarizationNode(
             {
               role: "system",
               content:
-                "You are summarizing a scheduling-assistant conversation for long-term memory. " +
+                "You are summarizing a conversation for long-term memory (domain-agnostic: the agent may specialize in any topic). " +
                 "Produce a concise summary AND an array of semantically self-contained chunks.\n\n" +
                 "Chunking rules:\n" +
                 "1. Each chunk must make sense on its own — never split mid-thought or separate a claim from its qualifier.\n" +
-                "2. Group related exchanges (e.g. a full Q&A about a preference) into one chunk.\n" +
+                "2. Group related exchanges (e.g. a full Q&A on one topic) into one chunk.\n" +
                 "3. Aim for 3-8 sentences per chunk; prefer more chunks over fewer if topics are unrelated.\n" +
                 "4. Include brief contextual framing so each chunk is understandable out of order.",
             },

@@ -2,8 +2,8 @@ import type { CompiledStateGraph } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { HumanMessage } from "@langchain/core/messages";
 import { Thread } from "@scheduling-agent/database";
-import { ensureSession } from "../memory/sessionRegistry";
-import { rotateThread } from "../memory/threadRotation";
+import { ensureSession } from "../sessionsManagment/sessionRegistry";
+import { rotateThread } from "../sessionsManagment/threadRotation";
 import { getLangfuseCallbackHandler, observeWithContext } from "../langfuse";
 import { logger } from "../logger";
 import { resolveModelSlug } from "./modelResolution";
@@ -51,7 +51,7 @@ export async function executeChatTurn(
   };
 
   return observeWithContext(
-    "scheduling_agent_chat",
+    "agent_chat_turn",
     async () => {
       // Resolve model slug from conversation scope
       const modelSlug = await resolveModelSlug(singleChatId, groupId);

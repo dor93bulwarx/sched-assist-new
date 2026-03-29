@@ -2,7 +2,7 @@
  * Entry point for the agent_service container.
  *
  * Initialises the PostgreSQL connection, runs the LangGraph Postgres
- * checkpointer setup, compiles the scheduler graph with persistence,
+ * checkpointer setup, compiles the LangGraph agent with persistence,
  * and starts an Express HTTP server on port 3001.
  */
 
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   // Chat turns (worker → executeChatTurn) pass `agentId` in graph state; contextBuilder
   // loads `agents.core_instructions` from the DB and merges them into the system prompt.
   const graph = await createSchedulerGraph();
-  logger.info("Scheduler graph compiled with PostgresSaver checkpointer");
+  logger.info("Agent graph compiled with PostgresSaver checkpointer");
 
   // 3. BullMQ: queue events + worker (per-thread serialization via Redis lock in worker).
   await agentChatQueueEvents.waitUntilReady();

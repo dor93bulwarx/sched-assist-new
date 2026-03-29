@@ -1,6 +1,6 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
-import { SchedulerAgentAnnotation, SchedulerAgentState } from "../../state";
+import { AgentAnnotation, AgentState } from "../../state";
 import { summarizationGuardNode } from "./nodes/summarizationGuard";
 import { sessionSummarizationNode } from "./nodes/sessionSummarization";
 import { contextBuilderNode } from "./nodes/contextBuilder";
@@ -8,7 +8,7 @@ import { callModelNode } from "./nodes/callModel";
 
 // ─── Routing helpers ─────────────────────────────────────────────────────────
 
-function routeAfterGuard(state: SchedulerAgentState): string {
+function routeAfterGuard(state: AgentState): string {
   if (state.needsSummarization) return "sessionSummarization";
   return "assembleContext";
 }
@@ -20,7 +20,7 @@ function routeAfterGuard(state: SchedulerAgentState): string {
 //            └── (normal)              → assembleContext → callModel → END
 //
 
-const workflow = new StateGraph(SchedulerAgentAnnotation)
+const workflow = new StateGraph(AgentAnnotation)
   .addNode("summarizationGuard", summarizationGuardNode)
   .addNode("sessionSummarization", sessionSummarizationNode)
   .addNode("assembleContext", contextBuilderNode)

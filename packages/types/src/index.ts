@@ -14,7 +14,7 @@ export interface UserIdentity {
   [key: string]: unknown;
 }
 
-// ─── Agents (scheduling personalities / product lines) ───────────────────────
+// ─── Agents (distinct personas / specializations / product lines) ─────────────
 
 /** Canonical agent identifier (`agents.id`). */
 export type AgentId = string;
